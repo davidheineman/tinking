@@ -1,0 +1,43 @@
+# [build-system]
+# requires = ["setuptools", "wheel"]
+# build-backend = "setuptools.build_meta"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["tinker_rl"]
+
+[project]
+name = "tinking"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "terminal-bench @ git+https://github.com/davidheineman/terminal-bench.git@thread-pool-fix", # "terminal-bench",
+    "minienv[beaker,docker,tbench] @ git+https://github.com/davidheineman/minienv.git",
+    
+    # tinker
+    "tinker",
+    "tinker-cookbook",
+    "torch",
+    "transformers",
+    "chz",
+]
+
+# [project.scripts]
+# paper = "tinking.cli:main"
+
+# [project.optional-dependencies]
+# dev = [
+#     "..."
+# ]
+# all = ["tinking[dev]"]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["tinking*"]
+exclude = []
