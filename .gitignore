@@ -1,0 +1,4 @@
+.venv
+tinker-cookbook
+*.egg-info
+uv.lock
