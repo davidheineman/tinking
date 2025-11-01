@@ -6,16 +6,7 @@ uv sync
 export TINKER_API_KEY=... # ensure it's set!
 ```
 
-### rl on code
-
-```bash
-python tinking/train_coding_rl.py \
-  --model-name "meta-llama/Llama-3.2-1B" \
-  --dataset-path path/to/dataset.jsonl \
-  --log-path ./logs \
-  --n-concurrent 4 \
-  --num-batches 100
-```
+### rl on tbench
 
 ```bash
 tb run \
