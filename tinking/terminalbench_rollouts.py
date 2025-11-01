@@ -1,36 +1,27 @@
-"""
-TerminalBench rollout system for RL training.
-
-This module handles:
-1. Running minitb to generate rollouts
-2. Parsing the rollout outputs
-3. Sending to grader for reward calculation
-"""
-
 import asyncio
 import json
 import logging
-import os
-import subprocess
+import random
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
-import tinker
 from tinker_cookbook.rl.types import TrajectoryGroup
+
+from constants import CURRENT_TASKS
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class MinitbConfig:
-    """Configuration for minitb rollouts."""
+    """Configuration for TerminalBench rollouts."""
     
-    agent: str = "terminus"  # Agent to use (e.g., terminus)
-    model_path: str = ""  # Tinker model path (e.g., tinker://...)
-    dataset_path: str = ""  # Path to dataset file
-    n_concurrent: int = 4  # Number of concurrent rollouts
+    agent: str = "terminus-tinker"  # Agent to use
+    model_name: str = ""  # Model name (e.g., Qwen/Qwen3-8B)
+    dataset_path: str = ""  # Path to dataset directory
+    n_concurrent: int = 1  # Number of concurrent rollouts
     output_dir: str = "/tmp/tinking/rollouts"  # Base output directory
     
 
@@ -39,36 +30,31 @@ async def run_minitb_rollouts(
     sampling_client_path: str,
     batch_idx: int,
 ) -> Path:
-    """
-    Run minitb to generate rollouts.
-    
-    Args:
-        config: MinitbConfig with rollout parameters
-        sampling_client_path: Path to the current model weights for sampling
-        batch_idx: Current batch index for naming
-        
-    Returns:
-        Path to the output directory containing rollouts
-    """
+    """ launch tbench """
     # Create timestamped output directory
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     output_path = Path(config.output_dir) / f"rollouts-{timestamp}-batch{batch_idx:06d}"
     output_path.mkdir(parents=True, exist_ok=True)
     
-    # Build the minitb command
+    # Sample a random task-id from constants
+    task_id = random.choice(CURRENT_TASKS)
+    
+    # Build the tb command
     cmd = [
-        "minitb",
+        "tb",
         "run",
-        "-a", config.agent,
-        "-m", sampling_client_path,
+        "--agent", config.agent,
+        "--agent-kwarg", f"checkpoint_path={sampling_client_path}",
+        "--agent-kwarg", f"model_name={config.model_name}",
         "--dataset-path", config.dataset_path,
+        "--task-id", task_id,
         "--n-concurrent", str(config.n_concurrent),
         "--output-path", str(output_path),
     ]
     
-    logger.info(f"Running minitb: {' '.join(cmd)}")
+    logger.info(f"Running tb: {' '.join(cmd)}")
     
-    # Run minitb as subprocess
+    # Run tb as subprocess
     try:
         process = await asyncio.create_subprocess_exec(
             *cmd,
@@ -79,30 +65,22 @@ async def run_minitb_rollouts(
         stdout, stderr = await process.communicate()
         
         if process.returncode != 0:
-            logger.error(f"minitb failed with return code {process.returncode}")
+            logger.error(f"tb failed with return code {process.returncode}")
             logger.error(f"stderr: {stderr.decode()}")
-            raise RuntimeError(f"minitb run failed: {stderr.decode()}")
+            raise RuntimeError(f"tb run failed: {stderr.decode()}")
         
-        logger.info(f"minitb completed successfully. Output at: {output_path}")
+        logger.info(f"tb completed successfully. Output at: {output_path}")
         logger.debug(f"stdout: {stdout.decode()}")
         
         return output_path
         
     except Exception as e:
-        logger.error(f"Error running minitb: {e}")
+        logger.error(f"Error running tb: {e}")
         raise
 
 
 def parse_rollout_file(rollout_path: Path) -> dict[str, Any]:
-    """
-    Parse a single rollout file from minitb output.
-    
-    Args:
-        rollout_path: Path to a rollout JSON file
-        
-    Returns:
-        Parsed rollout data as a dictionary
-    """
+    """ Parse a rollout file """
     try:
         with open(rollout_path, 'r') as f:
             data = json.load(f)
@@ -113,19 +91,11 @@ def parse_rollout_file(rollout_path: Path) -> dict[str, Any]:
 
 
 def extract_rollouts(output_dir: Path) -> list[dict[str, Any]]:
-    """
-    Extract all rollouts from a minitb output directory.
-    
-    Args:
-        output_dir: Path to the minitb output directory
-        
-    Returns:
-        List of parsed rollout dictionaries
-    """
+    """ Parse tbench output """
     rollouts = []
     
     # Look for JSON files in the output directory
-    # Adjust this pattern based on actual minitb output structure
+    # Adjust this pattern based on actual tb output structure
     rollout_files = list(output_dir.glob("*.json")) + list(output_dir.glob("**/*.json"))
     
     if not rollout_files:
@@ -146,16 +116,7 @@ def extract_rollouts(output_dir: Path) -> list[dict[str, Any]]:
 
 
 async def grade_rollouts(rollouts: list[dict[str, Any]], grader_model: str | None = None) -> list[float]:
-    """
-    Grade rollouts using a grader model to calculate rewards.
-    
-    Args:
-        rollouts: List of rollout dictionaries
-        grader_model: Optional path/name of grader model
-        
-    Returns:
-        List of reward scores, one per rollout
-    """
+    """ Grade rollout """
     # TODO: Implement actual grading logic
     # For now, return placeholder rewards
     logger.warning("Grader model not implemented yet. Returning placeholder rewards.")
@@ -181,19 +142,9 @@ def rollouts_to_trajectory_groups(
     rewards: list[float],
     group_size: int,
 ) -> list[TrajectoryGroup]:
-    """
-    Convert minitb rollouts and rewards into TrajectoryGroup objects for RL training.
-    
-    Args:
-        rollouts: List of parsed rollout dictionaries
-        rewards: Corresponding reward scores
-        group_size: Number of rollouts per group (for advantage computation)
-        
-    Returns:
-        List of TrajectoryGroup objects
-    """
-    # TODO: Implement conversion from minitb rollouts to tinker TrajectoryGroup format
-    # This will depend on the structure of minitb's output
+    """ tbench rollout -> tinker rollout """
+    # TODO: Implement conversion from tb rollouts to tinker TrajectoryGroup format
+    # This will depend on the structure of tb's output
     
     logger.warning("rollouts_to_trajectory_groups not fully implemented yet")
     
@@ -219,20 +170,8 @@ async def do_terminalbench_rollouts(
     group_size: int,
     grader_model: str | None = None,
 ) -> list[TrajectoryGroup]:
-    """
-    Complete pipeline: run minitb, extract rollouts, grade, and convert to TrajectoryGroups.
-    
-    Args:
-        config: MinitbConfig with rollout parameters
-        sampling_client_path: Path to the current model weights
-        batch_idx: Current batch index
-        group_size: Number of rollouts per trajectory group
-        grader_model: Optional grader model for reward calculation
-        
-    Returns:
-        List of TrajectoryGroup objects ready for RL training
-    """
-    # Step 1: Run minitb to generate rollouts
+    """ run tb -> extract rollouts -> grade -> convert to TrajectoryGroups """
+    # Step 1: Run tb to generate rollouts
     output_dir = await run_minitb_rollouts(config, sampling_client_path, batch_idx)
     
     # Step 2: Extract rollouts from output directory

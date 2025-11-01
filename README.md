@@ -18,3 +18,11 @@ tb run \
   --n-concurrent 1 \
   --output-path ~/tmp/tbench
 ```
+
+Design ideas:
+
+- Each turn samples using the above command, then pulls the output from the command
+   - Then, it pulls the new model during training
+- Each turn also uploads traces to transluce (labeled with train step)
+
+- Only uses the existing images, which can be used without any need to use `papergym` logic
