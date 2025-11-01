@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class MinitbConfig:
-    """Configuration for TerminalBench rollouts."""
+    """Config for `minitb` rollouts"""
     
     agent: str = "terminus-tinker"
     model_name: str = ""
@@ -49,8 +49,11 @@ def run_minitb_rollouts(
     output_path = Path(config.output_dir) / f"rollouts-{timestamp}-batch{batch_idx:06d}"
     output_path.mkdir(parents=True, exist_ok=True)
     
-    task_id = random.choice(CURRENT_TASKS)
-    dataset_path_expanded = str(Path(config.dataset_path).expanduser())
+    if "papergym" in config.dataset_path:
+        # manual override for built images in beaker
+        task_id = random.choice(CURRENT_TASKS)
+    else:
+        task_id = random.choice(config.task_id)
     
     cmd = [
         "minitb",
@@ -58,16 +61,21 @@ def run_minitb_rollouts(
         "--agent", config.agent,
         "--agent-kwarg", f"checkpoint_path={sampling_client_path}",
         "--agent-kwarg", f"model_name={config.model_name}",
-        
-        # "--dataset-path", dataset_path_expanded,
-        # "--task-id", task_id,
-        
-        "--dataset", "terminal-bench-core==0.1.1",
-        "--task-id", "hello-world",
-
+        "--task-id", task_id,
         "--n-concurrent", str(config.n_concurrent),
         "--output-path", str(output_path),
     ]
+
+    if config.dataset:
+        cmd += [
+            "--dataset", config.dataset,
+        ]
+    
+    if config.dataset_path:
+        dataset_path_expanded = str(Path(config.dataset_path).expanduser())
+        cmd += [
+            "--dataset-path", dataset_path_expanded,
+        ]
     
     logger.info(f"Running tb: {' '.join(cmd)}")
     

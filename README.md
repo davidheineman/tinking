@@ -41,20 +41,20 @@ minitb run \
 ### test trainer
 
 ```sh
-# rl on hello world (TODO: make a command that works)
+# rl on hello world
 python tinking/trainer.py \
   model_name="Qwen/Qwen3-8B" \
-  log_path=./logs \
-  n_concurrent=1 \
-  num_batches=5
+  num_batches=5 \
+  group_size=1 \
+  minitb.dataset="terminal-bench-core==0.1.1" \
+  minitb.task_id=hello-world
 
 # debugging scale
 python tinking/trainer.py \
   model_name="Qwen/Qwen3-8B" \
-  dataset_path=~/ai2/papergym/papers \
-  log_path=./logs \
-  n_concurrent=1 \
-  num_batches=5
+  num_batches=5 \
+  group_size=1 \
+  minitb.dataset_path=~/ai2/papergym/papers
 ```
 
 </details>
@@ -62,22 +62,19 @@ python tinking/trainer.py \
 ### rl on papergym
 
 ```sh
-# Qwen/Qwen3-235B-A22B-Instruct-2507
-# openai/gpt-oss-120b
-
 # big run
 python tinking/trainer.py \
   model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" \
-  dataset_path=~/ai2/papergym/papers \
-  log_path=./logs \
-  n_concurrent=1 \
-  num_batches=100
+  num_batches=100 \
+  group_size=4 \
+  minitb.dataset_path=~/ai2/papergym/papers
+
+# openai/gpt-oss-120b
 ```
 
-Design ideas:
+### plans
 
-- Each turn samples using the above command, then pulls the output from the command
-   - Then, it pulls the new model during training
-- Each turn also uploads traces to transluce (labeled with train step)
-
-- Only uses the existing images, which can be used without any need to use `papergym` logic
+[X] Each turn samples using the above command, then pulls the output from the command
+   [ ] Then, it pulls the new model during training
+[ ] Each turn also uploads traces to transluce (labeled with train step)
+[ ] Only uses the existing images, which can be used without any need to use `papergym` logic

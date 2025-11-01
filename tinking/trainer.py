@@ -1,12 +1,13 @@
 import asyncio
 import logging
 import os
+from pathlib import Path
 
 import chz
 import tinker
 from tinker import types
 
-from tinker_cookbook import checkpoint_utils
+from tinker_cookbook import checkpoint_utils, model_info
 from tinker_cookbook.rl.data_processing import assemble_training_data, compute_advantages
 from tinker_cookbook.tokenizer_utils import get_tokenizer
 from tinker_cookbook.renderers import get_renderer
@@ -19,52 +20,47 @@ logging.basicConfig(level=logging.INFO)
 
 @chz.chz
 class Config:    
-    # Model configuration
+    # model config
     model_name: str = "meta-llama/Llama-3.2-1B"
     lora_rank: int = 32
-    renderer_name: str = "llama3"  # Renderer to use for tokenization # TODO: identify this automatically
     
-    # Training hyperparameters
-    group_size: int = 4  # number of samples per problem
-    learning_rate: float = 1e-4
+    # hparams
+    group_size: int = 4
+    lr: float = 1e-4
     num_batches: int = 100
     
-    # TerminalBench / minitb configuration
-    dataset_path: str = ""  # Path to dataset for minitb (required)
-    agent: str = "terminus-tinker"  # Agent to use with minitb
-    n_concurrent: int = 4  # Number of concurrent rollouts for minitb
-    rollout_output_dir: str = "/tmp/tinking/rollouts"  # Base directory for rollout outputs
-    grader_model: str | None = None  # Optional grader model (not implemented yet)
+    # minitb config
+    minitb: MinitbConfig = None
+    grader_model: str | None = None  # (not implemented yet)
     
-    # Logging and checkpointing
-    log_path: str = "/tmp/tinker-coding-rl"
+    # administravista
+    # log_path: str = "~/.cache/tinking/logs"
+    log_path: str = "logs"
     save_every: int = 10
     base_url: str | None = None
 
 
-
-
 async def main(config: Config):
     """Main training loop using TerminalBench."""
+    # Initialize minitb config if not provided
+    if config.minitb is None:
+        config.minitb = MinitbConfig()
+    
+    # Override model_name in minitb config to match training model
+    config.minitb.model_name = config.model_name
+    config.minitb.n_concurrent = config.group_size
+    
     # Setup logging
     os.makedirs(config.log_path, exist_ok=True)
-    os.makedirs(config.rollout_output_dir, exist_ok=True)
+    os.makedirs(config.minitb.output_dir, exist_ok=True)
     
-    logger.info(f"Using TerminalBench with dataset: {config.dataset_path}")
+    logger.info(f"Using TerminalBench with dataset: {config.minitb.dataset_path or config.minitb.dataset}")
     
     # Create tokenizer and renderer for rollout conversion
     tokenizer = get_tokenizer(config.model_name)
-    renderer = get_renderer(config.renderer_name, tokenizer)
-    logger.info(f"Using renderer: {config.renderer_name}")
-    
-    # Create minitb configuration
-    minitb_config = MinitbConfig(
-        agent=config.agent,
-        model_name=config.model_name,
-        dataset_path=config.dataset_path,
-        n_concurrent=config.n_concurrent,
-        output_dir=config.rollout_output_dir,
-    )
+    renderer_name = model_info.get_recommended_renderer_name(config.model_name)
+    renderer = get_renderer(renderer_name, tokenizer)
+    logger.info(f"Using renderer: {renderer_name}")
     
     # Setup training client
     service_client = tinker.ServiceClient(base_url=config.base_url)
@@ -96,7 +92,7 @@ async def main(config: Config):
         
         # Run TerminalBench rollouts
         trajectory_groups = do_terminalbench_rollouts(
-            config=minitb_config,
+            config=config.minitb,
             sampling_client_path=sampling_path,
             batch_idx=batch_idx,
             group_size=config.group_size,
@@ -116,9 +112,11 @@ async def main(config: Config):
             if len(set(rewards)) > 1:  # Has variance
                 trajectory_groups_filtered.append(group)
         
-        if not trajectory_groups_filtered:
-            logger.warning("All rewards are uniform. Skipping batch.")
-            continue
+        # TODO: For now, I want to just train on zero varaince rewards anyways. (I think I can do this?)
+        
+        # if not trajectory_groups_filtered:
+        #     logger.warning("All rewards are uniform. Skipping batch.")
+        #     continue
         
         # Compute advantages
         advantages_P = compute_advantages(trajectory_groups_filtered)
@@ -136,7 +134,7 @@ async def main(config: Config):
         
         # Optimizer step
         adam_params = types.AdamParams(
-            learning_rate=config.learning_rate, beta1=0.9, beta2=0.95, eps=1e-8
+            lr=config.lr, beta1=0.9, beta2=0.95, eps=1e-8
         )
         await training_client.optim_step_async(adam_params)
         
