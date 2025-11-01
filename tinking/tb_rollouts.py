@@ -131,7 +131,7 @@ def extract_rollouts(output_dir: Path) -> list[dict[str, Any]]:
 
 def grade_rollouts(rollouts: list[dict[str, Any]], grader_model: str | None = None) -> list[float]:
     """ Grade rollout """
-    logger.warning(f"Using grader: {grader_model}.")
+    logger.info(f"Using grader: {grader_model}.")
     
     if grader_model == "random":
         # Channeling my inner demons https://arxiv.org/abs/2506.10947

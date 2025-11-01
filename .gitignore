@@ -4,3 +4,4 @@ tinker-cookbook
 uv.lock
 logs
 *.pyc
+rollouts

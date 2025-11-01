@@ -45,7 +45,7 @@ minitb run \
 python tinking/trainer.py \
   model_name="Qwen/Qwen3-8B" \
   num_batches=5 \
-  group_size=1 \
+  group_size=4 \
   minitb.dataset="terminal-bench-core==0.1.1" \
   minitb.task_id=hello-world
 

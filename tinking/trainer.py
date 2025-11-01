@@ -5,7 +5,8 @@ import os
 import chz
 import tinker
 from tinker import types
-from rich import print as rprint
+
+from rich.console import Console
 
 from tinker_cookbook import checkpoint_utils, model_info
 from tinker_cookbook.rl.data_processing import assemble_training_data, compute_advantages
@@ -13,6 +14,8 @@ from tinker_cookbook.tokenizer_utils import get_tokenizer
 from tinker_cookbook.renderers import get_renderer
 
 from tb_rollouts import MinitbConfig, do_terminalbench_rollouts
+
+console = Console()
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -52,7 +55,7 @@ async def setup_config(config: Config):
     os.makedirs(config.log_path, exist_ok=True)
     os.makedirs(config.minitb.output_dir, exist_ok=True)
 
-    rprint(config)
+    console.print(config)
 
     return config
 
@@ -140,16 +143,19 @@ async def main(config: Config):
         
         # Optimizer step
         adam_params = types.AdamParams(
-            lr=config.lr, beta1=0.9, beta2=0.95, eps=1e-8
+            learning_rate=config.lr, beta1=0.9, beta2=0.95, eps=1e-8
         )
         await training_client.optim_step_async(adam_params)
         
         # Log metrics
-        mean_reward = sum(
-            sum(g.get_total_rewards()) / len(g.get_total_rewards())
-            for g in trajectory_groups_filtered
-        ) / len(trajectory_groups_filtered)
-        logger.info(f"Batch {batch_idx}: Mean reward = {mean_reward:.3f}")
+        if trajectory_groups_filtered:
+            mean_reward = sum(
+                sum(g.get_total_rewards()) / len(g.get_total_rewards())
+                for g in trajectory_groups_filtered
+            ) / len(trajectory_groups_filtered)
+            logger.info(f"Batch {batch_idx}: Mean reward = {mean_reward:.3f}")
+        else:
+            logger.info(f"Batch {batch_idx}: No trajectory groups to compute mean reward")
         
         # Save checkpoint
         if (batch_idx + 1) % config.save_every == 0:
