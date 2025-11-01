@@ -1,7 +1,7 @@
-import asyncio
 import json
 import logging
 import random
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -25,7 +25,7 @@ class MinitbConfig:
     output_dir: str = "/tmp/tinking/rollouts"  # Base output directory
     
 
-async def run_minitb_rollouts(
+def run_minitb_rollouts(
     config: MinitbConfig,
     sampling_client_path: str,
     batch_idx: int,
@@ -57,28 +57,33 @@ async def run_minitb_rollouts(
     
     logger.info(f"Running tb: {' '.join(cmd)}")
     
-    # Run tb as subprocess
+    # Run tb as subprocess with streaming logs
     try:
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            universal_newlines=True
         )
         
-        stdout, stderr = await process.communicate()
+        # Stream output in real-time
+        for line in iter(process.stdout.readline, ''):
+            logger.info(f"minitb: {line.rstrip()}")
         
-        if process.returncode != 0:
-            logger.error(f"tb failed with return code {process.returncode}")
-            logger.error(f"stderr: {stderr.decode()}")
-            raise RuntimeError(f"tb run failed: {stderr.decode()}")
+        # Wait for process to complete
+        return_code = process.wait()
         
-        logger.info(f"tb completed successfully. Output at: {output_path}")
-        logger.debug(f"stdout: {stdout.decode()}")
+        if return_code != 0:
+            logger.error(f"minitb failed with return code {return_code}")
+            raise RuntimeError(f"minitb run failed with return code {return_code}")
         
+        logger.info(f"minitb completed successfully. Output at: {output_path}")
         return output_path
         
     except Exception as e:
-        logger.error(f"Error running tb: {e}")
+        logger.error(f"Error running minitb: {e}")
         raise
 
 
@@ -118,7 +123,7 @@ def extract_rollouts(output_dir: Path) -> list[dict[str, Any]]:
     return rollouts
 
 
-async def grade_rollouts(rollouts: list[dict[str, Any]], grader_model: str | None = None) -> list[float]:
+def grade_rollouts(rollouts: list[dict[str, Any]], grader_model: str | None = None) -> list[float]:
     """ Grade rollout """
     # TODO: Implement actual grading logic
     # For now, return placeholder rewards
@@ -166,7 +171,7 @@ def rollouts_to_trajectory_groups(
     return trajectory_groups
 
 
-async def do_terminalbench_rollouts(
+def do_terminalbench_rollouts(
     config: MinitbConfig,
     sampling_client_path: str,
     batch_idx: int,
@@ -175,7 +180,7 @@ async def do_terminalbench_rollouts(
 ) -> list[TrajectoryGroup]:
     """ run tb -> extract rollouts -> grade -> convert to TrajectoryGroups """
     # Step 1: Run tb to generate rollouts
-    output_dir = await run_minitb_rollouts(config, sampling_client_path, batch_idx)
+    output_dir = run_minitb_rollouts(config, sampling_client_path, batch_idx)
     
     # Step 2: Extract rollouts from output directory
     rollouts = extract_rollouts(output_dir)
@@ -185,7 +190,7 @@ async def do_terminalbench_rollouts(
         return []
     
     # Step 3: Grade rollouts to get rewards
-    rewards = await grade_rollouts(rollouts, grader_model)
+    rewards = grade_rollouts(rollouts, grader_model)
     
     # Step 4: Convert to TrajectoryGroups
     trajectory_groups = rollouts_to_trajectory_groups(rollouts, rewards, group_size)

@@ -9,7 +9,7 @@ from tinker import types
 from tinker_cookbook import checkpoint_utils
 from tinker_cookbook.rl.data_processing import assemble_training_data, compute_advantages
 
-from terminalbench_rollouts import MinitbConfig, do_terminalbench_rollouts
+from tb_rollouts import MinitbConfig, do_terminalbench_rollouts
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -28,7 +28,7 @@ class Config:
     
     # TerminalBench / minitb configuration
     dataset_path: str = ""  # Path to dataset for minitb (required)
-    agent: str = "terminus"  # Agent to use with minitb
+    agent: str = "terminus-tinker"  # Agent to use with minitb
     n_concurrent: int = 4  # Number of concurrent rollouts for minitb
     rollout_output_dir: str = "/tmp/tinking/rollouts"  # Base directory for rollout outputs
     grader_model: str | None = None  # Optional grader model (not implemented yet)
@@ -56,6 +56,7 @@ async def main(config: Config):
     # Create minitb configuration
     minitb_config = MinitbConfig(
         agent=config.agent,
+        model_name=config.model_name,
         dataset_path=config.dataset_path,
         n_concurrent=config.n_concurrent,
         output_dir=config.rollout_output_dir,
@@ -90,7 +91,7 @@ async def main(config: Config):
         logger.info(f"Batch {batch_idx}/{config.num_batches}")
         
         # Run TerminalBench rollouts
-        trajectory_groups = await do_terminalbench_rollouts(
+        trajectory_groups = do_terminalbench_rollouts(
             config=minitb_config,
             sampling_client_path=sampling_path,
             batch_idx=batch_idx,
