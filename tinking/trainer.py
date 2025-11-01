@@ -1,17 +1,21 @@
 import asyncio
 import logging
 import os
+import time
+from typing import Optional
 
 import chz
+import wandb
 import tinker
-from tinker import types
+from tinker import SamplingClient, ServiceClient, types
 
 from rich.console import Console
 
 from tinker_cookbook import checkpoint_utils, model_info
 from tinker_cookbook.rl.data_processing import assemble_training_data, compute_advantages
+from tinker_cookbook.rl.types import TrajectoryGroup
 from tinker_cookbook.tokenizer_utils import get_tokenizer
-from tinker_cookbook.renderers import get_renderer
+from tinker_cookbook.renderers import Renderer, get_renderer
 
 from tb_rollouts import MinitbConfig, do_terminalbench_rollouts
 
@@ -19,6 +23,15 @@ console = Console()
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+@chz.chz
+class WandbConfig:
+    """Config for Weights & Biases logging"""
+    enabled: bool = True
+    project: str = "tinker"
+    entity: Optional[str] = None
+    run_name: Optional[str] = None
+    tags: list[str] = None
 
 
 @chz.chz
@@ -33,8 +46,11 @@ class Config:
     num_batches: int = 100
     
     # minitb config
-    minitb: MinitbConfig = None
+    minitb: MinitbConfig = chz.field(default_factory=MinitbConfig)
     grader_model: str = "random"
+    
+    # wandb config
+    wandb: WandbConfig = chz.field(default_factory=WandbConfig)
     
     # administravista
     log_path: str = "logs" # "~/.cache/tinking/logs"
@@ -42,11 +58,52 @@ class Config:
     base_url: str | None = None
 
 
-async def setup_config(config: Config):
-    # Initialize minitb config if not provided
-    if config.minitb is None:
-        config.minitb = MinitbConfig()
+async def recompute_logprobs(
+    trajectory_groups: list[TrajectoryGroup],
+    sampling_client_path: str,
+    renderer: Renderer,
+) -> list[TrajectoryGroup]:
+    """ fill in logprobs for trajectories  """
+    # Create sampling client
+    service_client: ServiceClient = ServiceClient()
+    sampling_client: SamplingClient = service_client.create_sampling_client(
+        model_path=sampling_client_path
+    )
     
+    logger.info("Re-computing logprobs for trajectories...")
+    
+    # Process each trajectory group
+    for traj_group in trajectory_groups:
+        for trajectory in traj_group.trajectories_G:
+            for transition in trajectory.transitions:
+                sample_result = await sampling_client.sample_async(
+                    prompt=transition.ob,
+                    num_samples=1,
+                    sampling_params=tinker.SamplingParams(
+                        temperature=1.0,
+                        max_tokens=len(transition.ac.tokens) + 100,
+                        stop=renderer.get_stop_sequences(),
+                    ),
+                )
+                
+                # Get logprobs from sampled sequence
+                sampled_logprobs = sample_result.sequences[0].logprobs
+                
+                # Match logprobs to the actual tokens taken
+                if sampled_logprobs and len(sampled_logprobs) >= len(transition.ac.tokens):
+                    transition.ac.maybe_logprobs = sampled_logprobs[:len(transition.ac.tokens)]
+                else:
+                    logger.warning(
+                        f"Not enough logprobs: got {len(sampled_logprobs) if sampled_logprobs else 0}, "
+                        f"need {len(transition.ac.tokens)}. Using zeros."
+                    )
+                    transition.ac.maybe_logprobs = [0.0] * len(transition.ac.tokens)
+    
+    logger.info("Finished re-computing logprobs")
+    return trajectory_groups
+
+
+async def setup_config(config: Config):
     # Override model_name in minitb config to match training model
     config.minitb.model_name = config.model_name
     config.minitb.n_concurrent = config.group_size
@@ -54,6 +111,23 @@ async def setup_config(config: Config):
     # Setup logging
     os.makedirs(config.log_path, exist_ok=True)
     os.makedirs(config.minitb.output_dir, exist_ok=True)
+
+    # Initialize wandb if enabled
+    if config.wandb.enabled:
+        tags = config.wandb.tags or []
+        tags.extend([
+            f"model:{config.model_name}",
+            f"lora_rank:{config.lora_rank}",
+        ])
+        
+        wandb.init(
+            project=config.wandb.project,
+            entity=config.wandb.entity,
+            name=config.wandb.run_name,
+            tags=tags,
+            config=config
+        )
+        logger.info(f"Initialized wandb: {config.wandb.project}")
 
     console.print(config)
 
@@ -98,6 +172,7 @@ async def main(config: Config):
     
     for batch_idx in range(start_batch, config.num_batches):
         logger.info(f"Batch {batch_idx}/{config.num_batches}")
+        step_start_time = time.time()
         
         # Run TerminalBench rollouts
         trajectory_groups = do_terminalbench_rollouts(
@@ -107,6 +182,11 @@ async def main(config: Config):
             group_size=config.group_size,
             renderer=renderer,
             grader_model=config.grader_model,
+        )
+        
+        # Fill in logprobs using the sampling client
+        trajectory_groups = await recompute_logprobs(
+            trajectory_groups, sampling_path, renderer
         )
         
         # Check if we got any trajectories
@@ -135,9 +215,18 @@ async def main(config: Config):
             trajectory_groups_filtered, advantages_P
         )
         
+        # Remove mask from loss_fn_inputs (importance_sampling doesn't use it)
+        def remove_mask(datum: tinker.Datum) -> tinker.Datum:
+            return tinker.Datum(
+                model_input=datum.model_input,
+                loss_fn_inputs={k: v for k, v in datum.loss_fn_inputs.items() if k != "mask"},
+            )
+        
+        data_D_no_mask = list(map(remove_mask, data_D))
+        
         # Training step
         fwd_bwd_future = await training_client.forward_backward_async(
-            data_D, loss_fn="importance_sampling"
+            data_D_no_mask, loss_fn="importance_sampling"
         )
         await fwd_bwd_future.result_async()
         
@@ -147,15 +236,53 @@ async def main(config: Config):
         )
         await training_client.optim_step_async(adam_params)
         
-        # Log metrics
-        if trajectory_groups_filtered:
-            mean_reward = sum(
-                sum(g.get_total_rewards()) / len(g.get_total_rewards())
-                for g in trajectory_groups_filtered
-            ) / len(trajectory_groups_filtered)
-            logger.info(f"Batch {batch_idx}: Mean reward = {mean_reward:.3f}")
-        else:
-            logger.info(f"Batch {batch_idx}: No trajectory groups to compute mean reward")
+        # Update sampling weights for next rollouts (do this after every step)
+        sampling_result = await training_client.save_weights_for_sampler_async(name=f"batch{batch_idx:06d}")
+        sampling_path = (await sampling_result.result_async()).path
+        logger.info(f"Updated sampling weights to: {sampling_path}")
+        
+        # Calculate metrics
+        step_time = time.time() - step_start_time
+        
+        # Calculate reward statistics
+        all_rewards = []
+        for group in trajectory_groups_filtered:
+            all_rewards.extend(group.get_total_rewards())
+        
+        mean_reward = sum(all_rewards) / len(all_rewards) if all_rewards else 0.0
+        reward_variance = (
+            sum((r - mean_reward) ** 2 for r in all_rewards) / len(all_rewards)
+            if len(all_rewards) > 0 else 0.0
+        )
+        
+        # Calculate token statistics
+        total_tokens = sum(
+            datum.model_input.length
+            for datum in data_D
+        )
+        num_rollouts = sum(len(group.trajectories_G) for group in trajectory_groups_filtered)
+        avg_tokens_per_rollout = total_tokens / num_rollouts if num_rollouts > 0 else 0.0
+        
+        # Log to console
+        logger.info(
+            f"Batch {batch_idx}: reward_mean={mean_reward:.3f}, "
+            f"reward_var={reward_variance:.3f}, "
+            f"total_tokens={total_tokens}, "
+            f"avg_tokens={avg_tokens_per_rollout:.1f}, "
+            f"step_time={step_time:.1f}s"
+        )
+        
+        # Log to wandb
+        if config.wandb.enabled:
+            wandb.log({
+                "batch": batch_idx,
+                "reward/mean": mean_reward,
+                "reward/variance": reward_variance,
+                "tokens/total": total_tokens,
+                "tokens/avg_per_rollout": avg_tokens_per_rollout,
+                "train/learning_rate": config.lr,
+                "time/step_seconds": step_time,
+            }, step=batch_idx)
         
         # Save checkpoint
         if (batch_idx + 1) % config.save_every == 0:
@@ -166,10 +293,6 @@ async def main(config: Config):
                 loop_state={"batch": batch_idx},
                 kind="both",
             )
-            # Update sampling weights for next rollouts
-            sampling_result = await training_client.save_weights_for_sampler_async(name=f"{batch_idx:06d}")
-            sampling_path = (await sampling_result.result_async()).path
-            logger.info(f"Updated sampling weights to: {sampling_path}")
     
     # Save final checkpoint
     await checkpoint_utils.save_checkpoint_async(
@@ -179,6 +302,10 @@ async def main(config: Config):
         loop_state={"batch": config.num_batches},
         kind="both",
     )
+    
+    if config.wandb.enabled:
+        wandb.finish()
+    
     logger.info("Training completed")
 
 

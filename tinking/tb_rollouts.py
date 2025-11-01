@@ -201,7 +201,7 @@ def _messages_to_trajectory(messages: list[dict[str, Any]], renderer: Renderer) 
         # Action: tokenized assistant response
         ac = TokensWithLogprobs(
             tokens=renderer.tokenizer.encode(messages[i+1]["content"], add_special_tokens=False),
-            maybe_logprobs=None
+            maybe_logprobs=None  # Will be filled in later
         )
         
         transitions.append(Transition(

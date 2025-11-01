@@ -51,6 +51,7 @@ python tinking/trainer.py \
   model_name="Qwen/Qwen3-8B" \
   num_batches=5 \
   group_size=4 \
+  wandb.enabled=False \
   minitb.dataset="terminal-bench-core==0.1.1" \
   minitb.task_id=hello-world
 
@@ -59,6 +60,7 @@ python tinking/trainer.py \
   model_name="Qwen/Qwen3-8B" \
   num_batches=5 \
   group_size=4 \
+  wandb.enabled=False \
   minitb.dataset_path=~/ai2/papergym/papers
 ```
 
@@ -71,7 +73,7 @@ python tinking/trainer.py \
 python tinking/trainer.py \
   model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" \
   num_batches=100 \
-  group_size=4 \
+  group_size=16 \
   minitb.dataset_path=~/ai2/papergym/papers
 
 # openai/gpt-oss-120b
@@ -79,7 +81,10 @@ python tinking/trainer.py \
 
 ### plans
 
+- [ ] Allow executing multiple task IDs at once
+- [ ] Extract correct/incorrect from terminalbench (not helpful for papergym, but helpful for terminalbench)
+
 - [X] Each turn samples using the above command, then pulls the output from the command
-   - [ ] Then, it pulls the new model during training
+   - [X] Then, it pulls the new model during training
 - [ ] Each turn also uploads traces to transluce (labeled with train step)
 - [ ] Only uses the existing images, which can be used without any need to use `papergym` logic
