@@ -13,9 +13,6 @@ dependencies = [
     # tinker
     "tinker-cookbook @ git+https://github.com/thinking-machines-lab/tinker-cookbook.git",
     "tinker",
-    "torch",
-    "transformers",
-    "chz",
 ]
 
 # [project.scripts]

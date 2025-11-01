@@ -1,27 +1,28 @@
 """
-Simple RL training script for coding tasks.
+RL training script for coding tasks using TerminalBench (minitb).
 
 Usage:
-    python train_coding_rl.py --model-name "meta-llama/Llama-3.2-1B" --log-path ./logs
+    python train_coding_rl.py \
+        --model-name "meta-llama/Llama-3.2-1B" \
+        --log-path ./logs \
+        --dataset-path path/to/dataset.jsonl
 """
 
 import asyncio
 import logging
 import os
-from typing import Sequence
 
 import chz
 import tinker
 from tinker import types
-from tinker.types.tensor_data import TensorData
 
 # Import from tinker-cookbook
-from tinker_cookbook import checkpoint_utils, model_info, renderers
-from tinker_cookbook.completers import TinkerTokenCompleter
+from tinker_cookbook import checkpoint_utils
 from tinker_cookbook.rl.data_processing import assemble_training_data, compute_advantages
-from tinker_cookbook.rl.rollouts import do_group_rollout
-from tinker_cookbook.rl.types import EnvGroupBuilder, RLDataset, TrajectoryGroup
-from tinker_cookbook.tokenizer_utils import get_tokenizer
+from tinker_cookbook.rl.types import TrajectoryGroup
+
+# Import TerminalBench rollout system
+from terminalbench_rollouts import MinitbConfig, do_terminalbench_rollouts
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -29,69 +30,51 @@ logging.basicConfig(level=logging.INFO)
 
 @chz.chz
 class Config:
-    """Configuration for RL training on coding tasks."""
+    """Configuration for RL training on coding tasks using TerminalBench."""
     
     # Model configuration
     model_name: str = "meta-llama/Llama-3.2-1B"
     lora_rank: int = 32
     
     # Training hyperparameters
-    groups_per_batch: int = 4
     group_size: int = 4  # number of samples per problem
     learning_rate: float = 1e-4
-    max_tokens: int = 512
     num_batches: int = 100
+    
+    # TerminalBench / minitb configuration
+    dataset_path: str = ""  # Path to dataset for minitb (required)
+    agent: str = "terminus"  # Agent to use with minitb
+    n_concurrent: int = 4  # Number of concurrent rollouts for minitb
+    rollout_output_dir: str = "/tmp/tinking/rollouts"  # Base directory for rollout outputs
+    grader_model: str | None = None  # Optional grader model (not implemented yet)
     
     # Logging and checkpointing
     log_path: str = "/tmp/tinker-coding-rl"
     save_every: int = 10
     base_url: str | None = None
-    
-    # Dataset (simple examples - customize as needed)
-    prompts: list[str] = chz.field(default_factory=lambda: [
-        "Write a Python function that returns the sum of two numbers.",
-        "Write a Python function that checks if a number is even.",
-        "Write a Python function that returns the factorial of n.",
-    ])
 
 
-class SimpleCodingDataset(RLDataset):
-    """Simple dataset that cycles through coding prompts."""
-    
-    def __init__(self, builders: list[EnvGroupBuilder], groups_per_batch: int):
-        self.builders = builders
-        self.groups_per_batch = groups_per_batch
-    
-    def __len__(self) -> int:
-        return (len(self.builders) + self.groups_per_batch - 1) // self.groups_per_batch
-    
-    def get_batch(self, index: int) -> Sequence[EnvGroupBuilder]:
-        start = index * self.groups_per_batch
-        end = min(start + self.groups_per_batch, len(self.builders))
-        return self.builders[start:end]
 
 
 async def main(config: Config):
-    """Main training loop."""
+    """Main training loop using TerminalBench."""
+    # Validate configuration
+    if not config.dataset_path:
+        raise ValueError("dataset_path is required for TerminalBench rollouts")
+    
     # Setup logging
     os.makedirs(config.log_path, exist_ok=True)
+    os.makedirs(config.rollout_output_dir, exist_ok=True)
     
-    # Get tokenizer and renderer
-    tokenizer = get_tokenizer(config.model_name)
-    renderer_name = model_info.get_recommended_renderer_name(config.model_name)
-    renderer = renderers.get_renderer(renderer_name, tokenizer)
-    logger.info(f"Using renderer: {renderer_name}")
+    logger.info(f"Using TerminalBench with dataset: {config.dataset_path}")
     
-    # Create dataset
-    from coding_env import CodingGroupBuilder
-    builders = [
-        CodingGroupBuilder(
-            renderer=renderer,
-            prompts=[config.prompts[i % len(config.prompts)]],
-        )
-        for i in range(config.num_batches * config.groups_per_batch)
-    ]
-    dataset = SimpleCodingDataset(builders, config.groups_per_batch)
+    # Create minitb configuration
+    minitb_config = MinitbConfig(
+        agent=config.agent,
+        dataset_path=config.dataset_path,
+        n_concurrent=config.n_concurrent,
+        output_dir=config.rollout_output_dir,
+    )
     
     # Setup training client
     service_client = tinker.ServiceClient(base_url=config.base_url)
@@ -109,38 +92,32 @@ async def main(config: Config):
         )
         start_batch = 0
     
-    # Create sampling client
+    # Save initial weights for sampling
     sampling_path = (
         await training_client.save_weights_for_sampler_async(name="initial")
     ).path
-    sampling_client = service_client.create_sampling_client(model_path=sampling_path)
     
-    # Create token completer (policy)
-    policy = TinkerTokenCompleter(
-        sampling_client=sampling_client,
-        max_tokens=config.max_tokens,
-    )
+    logger.info(f"Initial sampling weights at: {sampling_path}")
     
     # Training loop
-    num_batches = len(dataset)
-    logger.info(f"Training for {num_batches} batches")
+    logger.info(f"Training for {config.num_batches} batches")
     
-    sampling_params = tinker.SamplingParams(
-        max_tokens=config.max_tokens,
-        stop=renderer.get_stop_sequences(),
-    )
-    
-    for batch_idx in range(start_batch, num_batches):
-        logger.info(f"Batch {batch_idx}/{num_batches}")
+    for batch_idx in range(start_batch, config.num_batches):
+        logger.info(f"Batch {batch_idx}/{config.num_batches}")
         
-        # Get batch of environment builders
-        env_group_builders = dataset.get_batch(batch_idx)
+        # Run TerminalBench rollouts
+        trajectory_groups = await do_terminalbench_rollouts(
+            config=minitb_config,
+            sampling_client_path=sampling_path,
+            batch_idx=batch_idx,
+            group_size=config.group_size,
+            grader_model=config.grader_model,
+        )
         
-        # Run rollouts
-        trajectory_groups: list[TrajectoryGroup] = []
-        for builder in env_group_builders:
-            traj_group = await do_group_rollout(builder, policy)
-            trajectory_groups.append(traj_group)
+        # Check if we got any trajectories
+        if not trajectory_groups:
+            logger.warning("No trajectory groups returned. Skipping batch.")
+            continue
         
         # Filter out groups with zero variance in rewards
         trajectory_groups_filtered = []
@@ -189,20 +166,18 @@ async def main(config: Config):
                 loop_state={"batch": batch_idx},
                 kind="both",
             )
-            # Update sampling client
+            # Update sampling weights for next rollouts
             sampling_path = (
                 await training_client.save_weights_for_sampler_async(name=f"{batch_idx:06d}")
             ).path
-            sampling_client = service_client.create_sampling_client(model_path=sampling_path)
-            policy.sampling_client = sampling_client
+            logger.info(f"Updated sampling weights to: {sampling_path}")
     
     # Save final checkpoint
-    num_batches = len(dataset)
     await checkpoint_utils.save_checkpoint_async(
         training_client=training_client,
         name="final",
         log_path=config.log_path,
-        loop_state={"batch": num_batches},
+        loop_state={"batch": config.num_batches},
         kind="both",
     )
     logger.info("Training completed")

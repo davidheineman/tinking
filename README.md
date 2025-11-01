@@ -10,10 +10,20 @@ export TINKER_API_KEY=... # ensure it's set!
 
 ```bash
 python tinking/train_coding_rl.py \
-    --model-name "meta-llama/Llama-3.2-1B" \
-    --log-path ./logs \
-    --num-batches 100 \
-    --groups-per-batch 4 \
-    --group-size 4 \
-    --learning-rate 1e-4
+  --model-name "meta-llama/Llama-3.2-1B" \
+  --dataset-path path/to/dataset.jsonl \
+  --log-path ./logs \
+  --n-concurrent 4 \
+  --num-batches 100
+```
+
+```bash
+tb run \
+  --agent terminus-tinker \
+  --agent-kwarg checkpoint_path=tinker://a4782131-a6c1-41bb-800d-af2f9b5a3db1/sampler_weights/000061 \
+  --agent-kwarg model_name=Qwen/Qwen3-8B \
+  --dataset terminal-bench-core==0.1.1 \
+  --task-id hello-world \
+  --n-concurrent 1 \
+  --output-path ~/tmp/tbench
 ```
