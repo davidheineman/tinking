@@ -1,15 +1,20 @@
 ### setup
 
 ```sh
-# Make sure `beaker` CLI is installed: https://beaker-docs.apps.allenai.org/start/install.html
+# Grab a key: https://tinker-console.thinkingmachines.ai/keys
+export TINKER_API_KEY=...
+```
 
+```sh
 uv sync
-
-export TINKER_API_KEY=... # ensure it's set!
 ```
 
 <details>
 <summary>debugging</summary>
+
+```sh
+# Make sure `beaker` CLI is installed: https://beaker-docs.apps.allenai.org/start/install.html
+```
 
 ### test tinker decoder in `tb` + local container
 
@@ -74,7 +79,7 @@ python tinking/trainer.py \
 
 ### plans
 
-[X] Each turn samples using the above command, then pulls the output from the command
-   [ ] Then, it pulls the new model during training
-[ ] Each turn also uploads traces to transluce (labeled with train step)
-[ ] Only uses the existing images, which can be used without any need to use `papergym` logic
+- [X] Each turn samples using the above command, then pulls the output from the command
+   - [ ] Then, it pulls the new model during training
+- [ ] Each turn also uploads traces to transluce (labeled with train step)
+- [ ] Only uses the existing images, which can be used without any need to use `papergym` logic
