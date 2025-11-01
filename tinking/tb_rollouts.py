@@ -6,11 +6,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from concurrent.futures import ThreadPoolExecutor
+from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+
 from tinker_cookbook.rl.types import TrajectoryGroup, Trajectory, Transition
 from tinker_cookbook.completers import TokensWithLogprobs
 from tinker_cookbook.renderers import Renderer
 
 from constants import CURRENT_TASKS
+
+console = Console()
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +52,7 @@ def run_minitb_rollouts(
     
     # Create timestamped output directory
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    output_path = Path(config.output_dir) / f"rollouts-{timestamp}-batch{batch_idx:06d}"
+    output_path = Path(config.output_dir) / f"rollouts-{timestamp}-batch{batch_idx}"
     output_path.mkdir(parents=True, exist_ok=True)
     
     if "papergym" in config.dataset_path:
@@ -221,20 +227,40 @@ def do_terminalbench_rollouts(
     grader_model: str | None = None,
 ) -> list[TrajectoryGroup]:
     """ run tb -> extract rollouts -> grade -> convert to TrajectoryGroups """
-    # Step 1: Run tb to generate rollouts
-    output_dir = run_minitb_rollouts(config, sampling_client_path, batch_idx)
+    # Step 1: Run tb to generate rollouts (group_size runs in parallel)
+    def run_single_rollout(i):
+        return run_minitb_rollouts(config, sampling_client_path, f"{batch_idx:06d}_{i}")
     
-    # Step 2: Extract rollouts from output directory
-    rollouts = extract_rollouts(output_dir)
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Running rollouts...", total=group_size)
+        
+        with ThreadPoolExecutor(max_workers=group_size) as executor:
+            futures = [executor.submit(run_single_rollout, i) for i in range(group_size)]
+            output_dirs = []
+            
+            for future in futures:
+                output_dirs.append(future.result())
+                progress.advance(task)
+    
+    # Step 2: Extract rollouts as List[Message]
+    rollouts = []
+    for output_dir in output_dirs:
+        rollouts.extend(extract_rollouts(output_dir))
     
     if not rollouts:
         logger.warning("No rollouts extracted! Returning empty list.")
         return []
     
-    # Step 3: Grade rollouts to get rewards
+    # Step 3: Grade rollouts
     rewards = grade_rollouts(rollouts, grader_model)
     
-    # Step 4: Convert to TrajectoryGroups
+    # Step 4: List[Message] -> TrajectoryGroups
     trajectory_groups = rollouts_to_trajectory_groups(rollouts, rewards, group_size, renderer)
     
     return trajectory_groups
