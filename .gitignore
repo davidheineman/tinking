@@ -2,3 +2,5 @@
 tinker-cookbook
 *.egg-info
 uv.lock
+logs
+*.pyc

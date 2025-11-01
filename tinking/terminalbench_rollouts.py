@@ -40,13 +40,16 @@ async def run_minitb_rollouts(
     task_id = random.choice(CURRENT_TASKS)
     
     # Build the tb command
+    # Expand ~ in dataset path if present
+    dataset_path_expanded = str(Path(config.dataset_path).expanduser())
+    
     cmd = [
-        "tb",
+        "minitb",
         "run",
         "--agent", config.agent,
         "--agent-kwarg", f"checkpoint_path={sampling_client_path}",
         "--agent-kwarg", f"model_name={config.model_name}",
-        "--dataset-path", config.dataset_path,
+        "--dataset-path", dataset_path_expanded,
         "--task-id", task_id,
         "--n-concurrent", str(config.n_concurrent),
         "--output-path", str(output_path),

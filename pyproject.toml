@@ -7,7 +7,7 @@ name = "tinking"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "terminal-bench @ git+https://github.com/davidheineman/terminal-bench.git@tinker", # "terminal-bench",
+    # "terminal-bench @ git+https://github.com/davidheineman/terminal-bench.git@tinker",
     "minienv[beaker,docker,tbench] @ git+https://github.com/davidheineman/minienv.git",
     
     # tinker

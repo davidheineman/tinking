@@ -1,13 +1,3 @@
-"""
-RL training script for coding tasks using TerminalBench (minitb).
-
-Usage:
-    python train_coding_rl.py \
-        --model-name "meta-llama/Llama-3.2-1B" \
-        --log-path ./logs \
-        --dataset-path path/to/dataset.jsonl
-"""
-
 import asyncio
 import logging
 import os
@@ -16,12 +6,9 @@ import chz
 import tinker
 from tinker import types
 
-# Import from tinker-cookbook
 from tinker_cookbook import checkpoint_utils
 from tinker_cookbook.rl.data_processing import assemble_training_data, compute_advantages
-from tinker_cookbook.rl.types import TrajectoryGroup
 
-# Import TerminalBench rollout system
 from terminalbench_rollouts import MinitbConfig, do_terminalbench_rollouts
 
 logger = logging.getLogger(__name__)
@@ -29,9 +16,7 @@ logging.basicConfig(level=logging.INFO)
 
 
 @chz.chz
-class Config:
-    """Configuration for RL training on coding tasks using TerminalBench."""
-    
+class Config:    
     # Model configuration
     model_name: str = "meta-llama/Llama-3.2-1B"
     lora_rank: int = 32
@@ -93,9 +78,8 @@ async def main(config: Config):
         start_batch = 0
     
     # Save initial weights for sampling
-    sampling_path = (
-        await training_client.save_weights_for_sampler_async(name="initial")
-    ).path
+    sampling_result = await training_client.save_weights_for_sampler_async(name="initial")
+    sampling_path = (await sampling_result.result_async()).path
     
     logger.info(f"Initial sampling weights at: {sampling_path}")
     
@@ -167,9 +151,8 @@ async def main(config: Config):
                 kind="both",
             )
             # Update sampling weights for next rollouts
-            sampling_path = (
-                await training_client.save_weights_for_sampler_async(name=f"{batch_idx:06d}")
-            ).path
+            sampling_result = await training_client.save_weights_for_sampler_async(name=f"{batch_idx:06d}")
+            sampling_path = (await sampling_result.result_async()).path
             logger.info(f"Updated sampling weights to: {sampling_path}")
     
     # Save final checkpoint
@@ -183,8 +166,11 @@ async def main(config: Config):
     logger.info("Training completed")
 
 
-if __name__ == "__main__":
-    import sys
-    config = chz.parse(Config, sys.argv[1:])
+def main_sync(config: Config):
+    """Synchronous wrapper for async main function."""
     asyncio.run(main(config))
+
+
+if __name__ == "__main__":
+    chz.nested_entrypoint(main_sync, allow_hyphens=True)
 

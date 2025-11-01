@@ -6,8 +6,6 @@ uv sync
 export TINKER_API_KEY=... # ensure it's set!
 ```
 
-### rl on tbench
-
 ```bash
 tb run \
   --agent terminus-tinker \
@@ -17,6 +15,17 @@ tb run \
   --task-id hello-world \
   --n-concurrent 1 \
   --output-path ~/tmp/tbench
+```
+
+### rl on tbench
+
+```bash
+python tinking/train_coding_rl.py \
+  model_name="meta-llama/Llama-3.2-1B" \
+  dataset_path=~/ai2/papergym/papers \
+  log_path=./logs \
+  n_concurrent=1 \
+  num_batches=100
 ```
 
 Design ideas:
