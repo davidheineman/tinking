@@ -8,6 +8,8 @@ from tinker import types
 
 from tinker_cookbook import checkpoint_utils
 from tinker_cookbook.rl.data_processing import assemble_training_data, compute_advantages
+from tinker_cookbook.tokenizer_utils import get_tokenizer
+from tinker_cookbook.renderers import get_renderer
 
 from tb_rollouts import MinitbConfig, do_terminalbench_rollouts
 
@@ -20,6 +22,7 @@ class Config:
     # Model configuration
     model_name: str = "meta-llama/Llama-3.2-1B"
     lora_rank: int = 32
+    renderer_name: str = "llama3"  # Renderer to use for tokenization # TODO: identify this automatically
     
     # Training hyperparameters
     group_size: int = 4  # number of samples per problem
@@ -43,15 +46,16 @@ class Config:
 
 async def main(config: Config):
     """Main training loop using TerminalBench."""
-    # Validate configuration
-    if not config.dataset_path:
-        raise ValueError("dataset_path is required for TerminalBench rollouts")
-    
     # Setup logging
     os.makedirs(config.log_path, exist_ok=True)
     os.makedirs(config.rollout_output_dir, exist_ok=True)
     
     logger.info(f"Using TerminalBench with dataset: {config.dataset_path}")
+    
+    # Create tokenizer and renderer for rollout conversion
+    tokenizer = get_tokenizer(config.model_name)
+    renderer = get_renderer(config.renderer_name, tokenizer)
+    logger.info(f"Using renderer: {config.renderer_name}")
     
     # Create minitb configuration
     minitb_config = MinitbConfig(
@@ -96,6 +100,7 @@ async def main(config: Config):
             sampling_client_path=sampling_path,
             batch_idx=batch_idx,
             group_size=config.group_size,
+            renderer=renderer,
             grader_model=config.grader_model,
         )
         
