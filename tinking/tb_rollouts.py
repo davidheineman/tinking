@@ -25,7 +25,7 @@ class MinitbConfig:
     dataset: str = ""
     task_id: list[str] = None
     n_concurrent: int = 1
-    output_dir: str = "~/.cache/tinking/rollouts"
+    output_dir: str = "rollouts" # "~/.cache/tinking/rollouts"
 
 
 def preflight_checks(config: MinitbConfig):
@@ -131,13 +131,16 @@ def extract_rollouts(output_dir: Path) -> list[dict[str, Any]]:
 
 def grade_rollouts(rollouts: list[dict[str, Any]], grader_model: str | None = None) -> list[float]:
     """ Grade rollout """
-    logger.warning("Grader model not implemented yet. Returning placeholder rewards.")
+    logger.warning(f"Using grader: {grader_model}.")
     
-    # Channeling my inner demons https://arxiv.org/abs/2506.10947
-    rewards = []
-    for i, rollout in enumerate(rollouts):
-        placeholder_reward = random.random()
-        rewards.append(placeholder_reward)
+    if grader_model == "random":
+        # Channeling my inner demons https://arxiv.org/abs/2506.10947
+        rewards = []
+        for i, rollout in enumerate(rollouts):
+            placeholder_reward = random.random()
+            rewards.append(placeholder_reward)
+    else:
+        raise ValueError(f"grader_model={grader_model}")
 
     return rewards
 

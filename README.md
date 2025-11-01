@@ -41,7 +41,7 @@ minitb run \
 ### test trainer
 
 ```sh
-# rl on hello world
+# RL on hello world
 python tinking/trainer.py \
   model_name="Qwen/Qwen3-8B" \
   num_batches=5 \
@@ -49,11 +49,11 @@ python tinking/trainer.py \
   minitb.dataset="terminal-bench-core==0.1.1" \
   minitb.task_id=hello-world
 
-# debugging scale
+# small scale run
 python tinking/trainer.py \
   model_name="Qwen/Qwen3-8B" \
   num_batches=5 \
-  group_size=1 \
+  group_size=4 \
   minitb.dataset_path=~/ai2/papergym/papers
 ```
 

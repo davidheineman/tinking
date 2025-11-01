@@ -1,11 +1,11 @@
 import asyncio
 import logging
 import os
-from pathlib import Path
 
 import chz
 import tinker
 from tinker import types
+from rich import print as rprint
 
 from tinker_cookbook import checkpoint_utils, model_info
 from tinker_cookbook.rl.data_processing import assemble_training_data, compute_advantages
@@ -31,17 +31,15 @@ class Config:
     
     # minitb config
     minitb: MinitbConfig = None
-    grader_model: str | None = None  # (not implemented yet)
+    grader_model: str = "random"
     
     # administravista
-    # log_path: str = "~/.cache/tinking/logs"
-    log_path: str = "logs"
+    log_path: str = "logs" # "~/.cache/tinking/logs"
     save_every: int = 10
     base_url: str | None = None
 
 
-async def main(config: Config):
-    """Main training loop using TerminalBench."""
+async def setup_config(config: Config):
     # Initialize minitb config if not provided
     if config.minitb is None:
         config.minitb = MinitbConfig()
@@ -53,8 +51,16 @@ async def main(config: Config):
     # Setup logging
     os.makedirs(config.log_path, exist_ok=True)
     os.makedirs(config.minitb.output_dir, exist_ok=True)
-    
-    logger.info(f"Using TerminalBench with dataset: {config.minitb.dataset_path or config.minitb.dataset}")
+
+    rprint(config)
+
+    return config
+
+
+async def main(config: Config):
+    """main trainer loop"""
+
+    config = await setup_config(config)
     
     # Create tokenizer and renderer for rollout conversion
     tokenizer = get_tokenizer(config.model_name)
