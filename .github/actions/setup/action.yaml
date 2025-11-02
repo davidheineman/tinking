@@ -1,0 +1,14 @@
+# copied from internal repo https://github.com/allenai/docker-images
+name: Build setup
+description: Setup the environment for a build
+inputs:
+  beaker_token:
+    description: The Beaker user token
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: allenai/setup-beaker@v2
+      with:
+        token: ${{ inputs.beaker_token }}
+        workspace: ai2/davidh

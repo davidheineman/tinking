@@ -48,25 +48,25 @@ minitb run \
 ```sh
 # RL on hello world
 python tinking/trainer.py \
-  model_name="Qwen/Qwen3-8B" \
+  model_name=Qwen/Qwen3-8B \
   num_batches=5 \
   group_size=4 \
   wandb.enabled=False \
-  minitb.dataset="terminal-bench-core==0.1.1" \
+  minitb.dataset=terminal-bench-core==0.1.1 \
   minitb.task_id=hello-world
 
 # RL on hello world + wandb
 python tinking/trainer.py \
-  model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" \
+  model_name=Qwen/Qwen3-235B-A22B-Instruct-2507 \
   num_batches=20 \
   group_size=16 \
-  wandb.run_name="debug-hello-world" \
-  minitb.dataset="terminal-bench-core==0.1.1" \
+  wandb.run_name=debug-hello-world \
+  minitb.dataset=terminal-bench-core==0.1.1 \
   minitb.task_id=hello-world
 
 # small scale run
 python tinking/trainer.py \
-  model_name="Qwen/Qwen3-8B" \
+  model_name=Qwen/Qwen3-8B \
   num_batches=5 \
   group_size=4 \
   wandb.enabled=False \
@@ -80,10 +80,10 @@ python tinking/trainer.py \
 ```sh
 # big run
 python tinking/trainer.py \
-  model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" \
+  model_name=Qwen/Qwen3-235B-A22B-Instruct-2507 \
   num_batches=100 \
   group_size=16 \
-  wandb.run_name="papergym" \
+  wandb.run_name=papergym \
   minitb.dataset_path=~/ai2/papergym/papers
 
 # openai/gpt-oss-120b
@@ -92,6 +92,22 @@ python tinking/trainer.py \
 ### rl on beaker
 
 ```sh
+# RL on hello world
+python tinking/beaker/launch.py \
+  workspace=ai2/davidh \
+  budget=ai2/oe-base \
+  follow=true \
+  allow_dirty=true \
+  -- \
+python tinking/trainer.py \
+  model_name=Qwen/Qwen3-8B \
+  num_batches=100 \
+  group_size=16 \
+  wandb.run_name=debug-hello-world \
+  minitb.dataset="terminal-bench-core==0.1.1" \
+  minitb.task_id=hello-world
+
+# big run
 python tinking/beaker/launch.py \
   workspace=ai2/davidh \
   budget=ai2/oe-base \
@@ -104,6 +120,15 @@ python tinking/trainer.py \
   group_size=16 \
   wandb.run_name=papergym \
   minitb.dataset_path=~/ai2/papergym/papers
+```
+
+### build Dockerfile
+
+```sh
+# manually build and deploy
+docker build --platform linux/amd64 -t tinking .
+beaker image delete davidh/tinking || true
+beaker image create --name tinking tinking
 ```
 
 ### plans

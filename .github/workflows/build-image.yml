@@ -1,0 +1,110 @@
+name: Build ai2/papgergym-orchestrator
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    # Run this workflow anytime anytime these paths update 
+    # (+ anytime there's a new release tag for this image)
+    paths:
+      - 'Dockerfile'
+      - 'src/**'
+      - '.github/workflows'
+    branches:
+      - main
+  schedule:
+    - cron: '0 5 * * *' # Refresh Cirrascale's docker cache every day at 5 AM
+  workflow_dispatch:  # allow manual triggers on GitHub UI
+    inputs:
+      run_build:
+        description: 'Build image'
+        type: boolean
+        default: true
+
+env:
+  DOCKER_BUILDKIT: "1"
+
+jobs:
+  build:
+    name: Build Image
+    runs-on: ubuntu-24.04 # ubuntu-latest
+    timeout-minutes: 60
+    if: (github.event_name != 'workflow_run' && (github.event_name != 'workflow_dispatch' || inputs.run_build)) || (github.event.workflow_run.conclusion == 'success')
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup environment
+        uses: ./.github/actions/setup
+        with:
+          beaker_token: ${{ secrets.BEAKER_TOKEN }}
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+          buildkitd-flags: --allow-insecure-entitlement security.insecure
+          install: true
+
+      - name: Delete tools folder # default github runner comes with bloat
+        run: |
+          sudo rm -rf /opt/hostedtoolcache
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/.ghcup
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/lib/jvm
+          sudo docker image prune -a -f
+          sudo docker builder prune -a -f
+          df -h
+
+      # Building directly into the docker cache would run out of memory
+      # so instead we build a tarfile, cleanup docker, then load the tarfile
+      # into docker and export
+      - name: Build image to tarfile
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          outputs: type=docker,dest=/tmp/papergym.tar
+          pull: true
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+      
+      - name: Show disk space and image size
+        run: |
+          df -h
+          ls -lh /tmp/papergym.tar
+
+      - name: Cleanup docker 
+        run: |
+          docker container prune -f
+          docker image prune -a -f
+          docker volume prune -f
+          docker system prune -a --volumes -f
+          docker builder prune --all -f
+          df -h
+          
+      - name: Load image into Docker daemon
+        run: |
+          docker load -i /tmp/papergym.tar
+          IMAGE_ID=$(docker images --quiet --no-trunc | head -n 1)
+          docker tag "$IMAGE_ID" papergym:latest
+
+      - name: Push image
+        uses: ./.github/actions/push
+        with:
+          image: papergym  # tag of the image we built in the previous step
+          beaker: papgergym-orchestrator  # name of the image on Beaker
+          latest: true  # label this image as the 'latest'
+
+      - name: Test image
+        uses: ./.github/actions/test
+        with:
+          beaker: papgergym-orchestrator  # name of the image on Beaker

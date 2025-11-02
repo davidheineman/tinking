@@ -34,8 +34,8 @@ class BeakerConfig:
     task_name: str = "papergym-tinker"
     priority: str = "normal"
     preemptible: bool = True
-    env: list[dict[str, str]] = chz.field(default_factory=list)  # TODO: Add parser from mason.py
-    secret: list[dict[str, str]] = chz.field(default_factory=list)  # TODO: Add parser from mason.py
+    env: list[dict[str, str]] = chz.field(default_factory=list)
+    secret: list[dict[str, str]] = chz.field(default_factory=list)
     no_host_networking: bool = False
     pure_docker_mode: bool = False
 
@@ -170,13 +170,6 @@ def launch_beaker(config: BeakerConfig):
     # mounts = None # TODO: fix mounts
     # mounts = get_mounts(config.beaker_datasets, config.cluster)
 
-    # # TODO: put this somewhere better
-    # UV_INIT = "deactivate && pip install uv && uv venv && source .venv/bin/activate && "
-    # UV_DEPS = ""
-    # env_vars += [
-    #     "LOCAL_RANK=0"
-    # ]  # TODO: deepspeed requires this, but i think its because I didn't initalize the backend correctly
-
     # Launch the experiment
     launch_experiment(
         args=full_commands.split(" "),
@@ -202,11 +195,9 @@ def launch_beaker(config: BeakerConfig):
         timeout=(
             99999999 if config.follow else 0
         ),  # only way to follow the experiment without canceling
-        # install="pip install -e '.[all]'",
-        # install=UV_INIT
-        # + UV_DEPS
-        # + "uv pip install -e '.[all]'",  # Workaournd as Gantry doesn't support uv
-        install="uv sync",
+
+        # install="uv sync",        
+        uv_venv="/app/.venv", # pre-installed uv directory
 
         allow_dirty=config.allow_dirty,
         dry_run=config.dry_run,
