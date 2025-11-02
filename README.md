@@ -83,9 +83,27 @@ python tinking/trainer.py \
   model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" \
   num_batches=100 \
   group_size=16 \
+  wandb.run_name="papergym" \
   minitb.dataset_path=~/ai2/papergym/papers
 
 # openai/gpt-oss-120b
+```
+
+### rl on beaker
+
+```sh
+python tinking/beaker/launch.py \
+  workspace=ai2/davidh \
+  budget=ai2/oe-base \
+  follow=true \
+  allow_dirty=true \
+  -- \
+python tinking/trainer.py \
+  model_name=Qwen/Qwen3-235B-A22B-Instruct-2507 \
+  num_batches=100 \
+  group_size=16 \
+  wandb.run_name=papergym \
+  minitb.dataset_path=~/ai2/papergym/papers
 ```
 
 ### plans

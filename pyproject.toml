@@ -8,17 +8,19 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     # "terminal-bench @ git+https://github.com/davidheineman/terminal-bench.git@tinker",
-    # "minienv[beaker,docker,tbench] @ git+https://github.com/davidheineman/minienv.git",
     
-    "minienv[beaker,docker,tbench]",
+    "minienv[beaker,docker,tbench] @ git+https://github.com/davidheineman/minienv.git",
+    # "minienv[beaker,docker,tbench]",
     
     "tinker-cookbook @ git+https://github.com/thinking-machines-lab/tinker-cookbook.git",
     "tinker",
-    "wandb"
+    "wandb",
+
+    "beaker-gantry"
 ]
 
-[tool.uv.sources]
-minienv = { path = "/Users/dhei/ai2/minienv", editable = true }
+# [tool.uv.sources]
+# minienv = { path = "/Users/dhei/ai2/minienv", editable = true }
 
 # [project.scripts]
 # paper = "tinking.cli:main"
