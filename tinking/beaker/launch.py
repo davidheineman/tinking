@@ -29,7 +29,7 @@ class BeakerConfig:
     max_retries: int = 0
     gpus: int = 0
     num_nodes: int = 1
-    image: str = "davidh/tinking"
+    image: str = "davidh/papgergym-orchestrator"
     description: str = "tinker 🤍 papergym conductor"
     task_name: str = "papergym-tinker"
     priority: str = "normal"
@@ -37,7 +37,7 @@ class BeakerConfig:
     env: list[dict[str, str]] = chz.field(default_factory=list)
     secret: list[dict[str, str]] = chz.field(default_factory=list)
     no_host_networking: bool = False
-    pure_docker_mode: bool = False
+    pure_docker_mode: bool = True
 
     # beaker_datasets: List[Dict[str, str]] = field(
     #     default_factory=list
@@ -196,8 +196,9 @@ def launch_beaker(config: BeakerConfig):
             99999999 if config.follow else 0
         ),  # only way to follow the experiment without canceling
 
-        # install="uv sync",        
+        install="mkdir -p ~/ai2 && git clone https://github.com/davidheineman/papergym.git ~/ai2/papergym",
         uv_venv="/app/.venv", # pre-installed uv directory
+        runtime_dir="/home",
 
         allow_dirty=config.allow_dirty,
         dry_run=config.dry_run,

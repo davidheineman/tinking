@@ -57,8 +57,8 @@ python tinking/trainer.py \
 
 # RL on hello world + wandb
 python tinking/trainer.py \
-  model_name=Qwen/Qwen3-235B-A22B-Instruct-2507 \
-  num_batches=20 \
+  model_name=Qwen/Qwen3-8B \
+  num_batches=100 \
   group_size=16 \
   wandb.run_name=debug-hello-world \
   minitb.dataset=terminal-bench-core==0.1.1 \
@@ -67,10 +67,19 @@ python tinking/trainer.py \
 # small scale run
 python tinking/trainer.py \
   model_name=Qwen/Qwen3-8B \
-  num_batches=5 \
-  group_size=4 \
+  num_batches=100 \
+  group_size=16 \
   wandb.enabled=False \
   minitb.dataset_path=~/ai2/papergym/papers
+```
+
+### build Dockerfile
+
+```sh
+# manually build and deploy
+docker build --platform linux/amd64 -t tinking .
+beaker image delete davidh/tinking || true
+beaker image create --name tinking tinking
 ```
 
 </details>
@@ -103,6 +112,7 @@ python tinking/trainer.py \
   model_name=Qwen/Qwen3-8B \
   num_batches=100 \
   group_size=16 \
+  log_path=/results \
   wandb.run_name=debug-hello-world \
   minitb.dataset="terminal-bench-core==0.1.1" \
   minitb.task_id=hello-world
@@ -118,17 +128,9 @@ python tinking/trainer.py \
   model_name=Qwen/Qwen3-235B-A22B-Instruct-2507 \
   num_batches=100 \
   group_size=16 \
+  log_path=/results \
   wandb.run_name=papergym \
   minitb.dataset_path=~/ai2/papergym/papers
-```
-
-### build Dockerfile
-
-```sh
-# manually build and deploy
-docker build --platform linux/amd64 -t tinking .
-beaker image delete davidh/tinking || true
-beaker image create --name tinking tinking
 ```
 
 ### plans

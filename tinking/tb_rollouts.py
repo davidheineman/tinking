@@ -14,7 +14,7 @@ from tinker_cookbook.rl.types import TrajectoryGroup, Trajectory, Transition
 from tinker_cookbook.completers import TokensWithLogprobs
 from tinker_cookbook.renderers import Renderer
 
-from constants import CURRENT_TASKS
+from constants import CURRENT_TASKS, BUILT_TBENCH_TASKS
 
 console = Console()
 
@@ -58,6 +58,8 @@ def run_minitb_rollouts(
     if "papergym" in config.dataset_path:
         # manual override for built images in beaker
         task_id = random.choice(CURRENT_TASKS)
+    elif "terminal-bench" in config.dataset:
+        task_id = random.choice(BUILT_TBENCH_TASKS)
     else:
         task_id = random.choice(config.task_id)
     

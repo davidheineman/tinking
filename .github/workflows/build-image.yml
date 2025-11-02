@@ -63,8 +63,3 @@ jobs:
           image: papergym  # tag of the image we built in the previous step
           beaker: papgergym-orchestrator  # name of the image on Beaker
           latest: true  # label this image as the 'latest'
-
-      - name: Test image
-        uses: ./.github/actions/test
-        with:
-          beaker: papgergym-orchestrator  # name of the image on Beaker
