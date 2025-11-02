@@ -1,7 +1,10 @@
 import asyncio
 import logging
 import os
+import random
+import string
 import time
+from datetime import datetime
 from typing import Optional
 
 import chz
@@ -108,9 +111,15 @@ async def setup_config(config: Config):
     config.minitb.model_name = config.model_name
     config.minitb.n_concurrent = config.group_size
     
-    # Setup logging
-    os.makedirs(config.log_path, exist_ok=True)
-    os.makedirs(config.minitb.output_dir, exist_ok=True)
+    # Get logging path
+    run_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    log_path = os.path.join(config.log_path, f"run-{run_timestamp}")
+    rollouts_dir = os.path.join(config.log_path, "rollouts", f"run-{run_timestamp}")
+
+    os.makedirs(log_path, exist_ok=True)
+    os.makedirs(rollouts_dir, exist_ok=True)
+
+    console.print(config)
 
     # Initialize wandb if enabled
     if config.wandb.enabled:
@@ -119,25 +128,28 @@ async def setup_config(config: Config):
             f"model:{config.model_name}",
             f"lora_rank:{config.lora_rank}",
         ])
+
+        model_name = config.model_name.split("/")[-1]
+
+        # add random 4 char string suffix
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+        run_name = f"{config.wandb.run_name or 'run'}-{model_name}-{random_suffix}"
         
         wandb.init(
             project=config.wandb.project,
             entity=config.wandb.entity,
-            name=config.wandb.run_name,
+            name=run_name,
             tags=tags,
             config=config
         )
-        logger.info(f"Initialized wandb: {config.wandb.project}")
 
-    console.print(config)
-
-    return config
+    return config, log_path, rollouts_dir
 
 
 async def main(config: Config):
     """main trainer loop"""
 
-    config = await setup_config(config)
+    config, log_path, rollouts_dir = await setup_config(config)
     
     # Create tokenizer and renderer for rollout conversion
     tokenizer = get_tokenizer(config.model_name)
@@ -148,7 +160,7 @@ async def main(config: Config):
     # Setup training client
     service_client = tinker.ServiceClient(base_url=config.base_url)
     
-    resume_info = checkpoint_utils.get_last_checkpoint(config.log_path)
+    resume_info = checkpoint_utils.get_last_checkpoint(log_path)
     if resume_info:
         training_client = await service_client.create_training_client_from_state_async(
             resume_info["state_path"]
@@ -182,6 +194,7 @@ async def main(config: Config):
             group_size=config.group_size,
             renderer=renderer,
             grader_model=config.grader_model,
+            output_dir=rollouts_dir,
         )
         
         # Fill in logprobs using the sampling client
@@ -289,7 +302,7 @@ async def main(config: Config):
             await checkpoint_utils.save_checkpoint_async(
                 training_client=training_client,
                 name=f"{batch_idx:06d}",
-                log_path=config.log_path,
+                log_path=log_path,
                 loop_state={"batch": batch_idx},
                 kind="both",
             )
@@ -298,7 +311,7 @@ async def main(config: Config):
     await checkpoint_utils.save_checkpoint_async(
         training_client=training_client,
         name="final",
-        log_path=config.log_path,
+        log_path=log_path,
         loop_state={"batch": config.num_batches},
         kind="both",
     )

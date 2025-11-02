@@ -31,7 +31,6 @@ class MinitbConfig:
     dataset: str = ""
     task_id: list[str] = None
     n_concurrent: int = 1
-    output_dir: str = "rollouts" # "~/.cache/tinking/rollouts"
 
 
 def preflight_checks(config: MinitbConfig):
@@ -46,13 +45,14 @@ def run_minitb_rollouts(
     config: MinitbConfig,
     sampling_client_path: str,
     batch_idx: int,
+    output_dir: str,
 ) -> Path:
     """ launch tbench """
     preflight_checks(config)
     
     # Create timestamped output directory
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    output_path = Path(config.output_dir) / f"rollouts-{timestamp}-batch{batch_idx}"
+    output_path = Path(output_dir) / f"{timestamp}-batch{batch_idx}"
     output_path.mkdir(parents=True, exist_ok=True)
     
     if "papergym" in config.dataset_path:
@@ -224,12 +224,13 @@ def do_terminalbench_rollouts(
     batch_idx: int,
     group_size: int,
     renderer: Renderer,
-    grader_model: str | None = None,
+    grader_model: str,
+    output_dir: str,
 ) -> list[TrajectoryGroup]:
     """ run tb -> extract rollouts -> grade -> convert to TrajectoryGroups """
     # Step 1: Run tb to generate rollouts (group_size runs in parallel)
     def run_single_rollout(i):
-        return run_minitb_rollouts(config, sampling_client_path, f"{batch_idx:06d}_{i}")
+        return run_minitb_rollouts(config, sampling_client_path, f"{batch_idx:06d}_{i}", output_dir)
     
     with Progress(
         SpinnerColumn(),

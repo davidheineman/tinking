@@ -55,6 +55,15 @@ python tinking/trainer.py \
   minitb.dataset="terminal-bench-core==0.1.1" \
   minitb.task_id=hello-world
 
+# RL on hello world + wandb
+python tinking/trainer.py \
+  model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" \
+  num_batches=20 \
+  group_size=16 \
+  wandb.run_name="debug-hello-world" \
+  minitb.dataset="terminal-bench-core==0.1.1" \
+  minitb.task_id=hello-world
+
 # small scale run
 python tinking/trainer.py \
   model_name="Qwen/Qwen3-8B" \
