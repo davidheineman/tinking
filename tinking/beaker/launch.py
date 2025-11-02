@@ -29,7 +29,7 @@ class BeakerConfig:
     max_retries: int = 0
     gpus: int = 0
     num_nodes: int = 1
-    image: str = "ai2/cuda12.8-dev-ubuntu22.04-torch2.7.0"
+    image: str = "davidh/tinking"
     description: str = "tinker 🤍 papergym conductor"
     task_name: str = "papergym-tinker"
     priority: str = "normal"

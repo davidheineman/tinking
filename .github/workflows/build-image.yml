@@ -12,10 +12,9 @@ on:
       - 'Dockerfile'
       - 'src/**'
       - '.github/workflows'
+      - 'pyproject.toml'
     branches:
       - main
-  schedule:
-    - cron: '0 5 * * *' # Refresh Cirrascale's docker cache every day at 5 AM
   workflow_dispatch:  # allow manual triggers on GitHub UI
     inputs:
       run_build:
@@ -47,55 +46,16 @@ jobs:
           buildkitd-flags: --allow-insecure-entitlement security.insecure
           install: true
 
-      - name: Delete tools folder # default github runner comes with bloat
-        run: |
-          sudo rm -rf /opt/hostedtoolcache
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /usr/local/share/boost
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo rm -rf /usr/local/.ghcup
-          sudo rm -rf /usr/share/swift
-          sudo rm -rf /usr/local/share/powershell
-          sudo rm -rf /usr/lib/jvm
-          sudo docker image prune -a -f
-          sudo docker builder prune -a -f
-          df -h
-
-      # Building directly into the docker cache would run out of memory
-      # so instead we build a tarfile, cleanup docker, then load the tarfile
-      # into docker and export
-      - name: Build image to tarfile
+      - name: Build image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
-          outputs: type=docker,dest=/tmp/papergym.tar
+          tags: papergym:latest
+          load: true
           pull: true
           build-args: |
             BUILDKIT_INLINE_CACHE=1
-      
-      - name: Show disk space and image size
-        run: |
-          df -h
-          ls -lh /tmp/papergym.tar
-
-      - name: Cleanup docker 
-        run: |
-          docker container prune -f
-          docker image prune -a -f
-          docker volume prune -f
-          docker system prune -a --volumes -f
-          docker builder prune --all -f
-          df -h
-          
-      - name: Load image into Docker daemon
-        run: |
-          docker load -i /tmp/papergym.tar
-          IMAGE_ID=$(docker images --quiet --no-trunc | head -n 1)
-          docker tag "$IMAGE_ID" papergym:latest
 
       - name: Push image
         uses: ./.github/actions/push
