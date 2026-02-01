@@ -10,6 +10,7 @@ from typing import Optional
 import chz
 import wandb
 import tinker
+from pprint import pformat
 from rich.console import Console
 from tinker import types
 from tinker_cookbook import checkpoint_utils, model_info
@@ -20,6 +21,7 @@ from tinker_cookbook.renderers import get_renderer
 from tinking.envs.base import Environment, EnvironmentConfig
 from tinking.envs.terminal import TerminalBenchEnvironment
 from tinking.envs.minerva import MinervaEnvironment
+from tinking.logs import log_batch_info
 
 console = Console()
 
@@ -28,7 +30,6 @@ logging.basicConfig(level=logging.INFO)
 
 @chz.chz
 class WandbConfig:
-    """Config for Weights & Biases logging"""
     enabled: bool = True
     project: str = "tinker"
     entity: Optional[str] = None
@@ -84,7 +85,7 @@ async def setup_config(config: Config):
     os.makedirs(log_path, exist_ok=True)
     os.makedirs(rollouts_dir, exist_ok=True)
 
-    console.print(config)
+    console.print(pformat(config, indent=2, width=100))
 
     # Initialize wandb if enabled
     if config.wandb.enabled:
@@ -181,6 +182,9 @@ async def main(config: Config):
             logger.warning("No trajectory groups returned. Skipping batch.")
             continue
         
+        # Log outputs
+        log_batch_info(trajectory_groups, tokenizer, num_examples=1)
+        
         # Filter out groups with zero variance in rewards
         trajectory_groups_filtered = []
         for group in trajectory_groups:
@@ -217,7 +221,7 @@ async def main(config: Config):
         
         # Optimizer step
         adam_params = types.AdamParams(
-            lr=config.optim.lr,
+            learning_rate=config.optim.lr,
             beta1=config.optim.beta1,
             beta2=config.optim.beta2,
             eps=config.optim.eps,
@@ -298,7 +302,7 @@ async def main(config: Config):
 
 
 def main_sync(config: Config):
-    """Synchronous wrapper for async main function."""
+    """ a sync wrapper for our async runner """
     asyncio.run(main(config))
 
 

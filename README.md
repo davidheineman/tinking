@@ -48,7 +48,7 @@ minitb run \
 ```sh
 # RL on MATH 500 + wandb
 python tinking/trainer.py \
-  model_name=Qwen/Qwen3-8B \
+  model_name=Qwen/Qwen3-4B-Instruct-2507 \
   num_batches=5 \
   group_size=4 \
   wandb.enabled=True \

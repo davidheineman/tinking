@@ -13,7 +13,7 @@ from tinker_cookbook.rl.problem_env import ProblemEnv, ProblemGroupBuilder, logg
 from tinker_cookbook.rl.rollouts import do_group_rollout
 from tinker_cookbook.rl.types import EnvGroupBuilder, RLDataset, TrajectoryGroup
 
-from minieval.tasks.minerva import MinervaMath, Math500
+from minieval.tasks.minerva import Instance, MinervaMath, Math500
 from minieval.datatypes import TaskConfig as MiniEvalTaskConfig, LMOutput
 from minieval.score.core import ExactMatchFlex
 from minieval.extract.math_latex import MathExtractor
@@ -37,42 +37,34 @@ class MinervaConfig(EnvironmentConfig):
 class MinervaEnv(ProblemEnv):
     def __init__(
         self,
-        problem: str,
-        answer: str,
+        instance: Instance,
         renderer: renderers.Renderer,
         convo_prefix: list[renderers.Message] | None = None,
     ):
         super().__init__(renderer, convo_prefix)
-        self.problem = problem
-        self.answer = answer
+        self.instance = instance
     
     @classmethod
     def question_suffix(cls) -> str:
         return " Present the answer in LaTeX format: \\boxed{Your answer}"
     
     def get_question(self) -> str:
-        return self.problem + self.question_suffix()
+        return self.instance.question + self.question_suffix()
     
     def check_format(self, sample_str: str) -> bool:
         answers = MathExtractor.extract_answer(sample_str)
-        has_answers = bool(len(answers) > 0)
-        return has_answers
+        return len(answers) > 0
     
     def check_answer(self, sample_str: str) -> bool:
         lm_output = LMOutput(text=sample_str)
         lm_output.extracted_answer = MathExtractor.extract_answer(sample_str)
         
-        # Create a minimal instance-like object for scoring
-        class MinimalInstance:
-            def __init__(self, answer: str):
-                self.answer = answer
-        
         scorer = ExactMatchFlex()
-        score = scorer._score_response_single(MinimalInstance(self.answer), lm_output)
+        score = scorer._score_response_single(self.instance, lm_output)
         return bool(score > 0)
     
     def get_reference_answer(self) -> str:
-        return self.answer
+        return str(self.instance.solution)
 
 
 class MinervaDataset(RLDataset):
@@ -95,7 +87,7 @@ class MinervaDataset(RLDataset):
         
         # Load dataset via minieval
         task = self._create_task(dataset, subset)
-        self.instances = list(task.requests)
+        self.instances: list[Instance] = list(task.requests)
         
         # Shuffle with seed
         import random
@@ -134,20 +126,15 @@ class MinervaDataset(RLDataset):
         
         return builders
     
-    def _make_env_group_builder(self, instance) -> ProblemGroupBuilder | None:
-        """Create an EnvGroupBuilder for a single problem."""
-        problem = instance.question
-        answer = instance.answer
-        
-        if not problem or not answer:
-            logger.warning(f"Skipping instance with missing problem/answer")
+    def _make_env_group_builder(self, instance: Instance) -> ProblemGroupBuilder | None:
+        if not instance.question or not instance.solution:
+            logger.warning("Skipping instance with missing question/solution")
             return None
         
         return ProblemGroupBuilder(
             env_thunk=partial(
                 MinervaEnv,
-                problem,
-                answer,
+                instance,
                 self.renderer,
                 convo_prefix=self.convo_prefix,
             ),
@@ -172,6 +159,9 @@ class MinervaEnvironment(Environment):
         self.renderer = renderer
         self.output_dir = output_dir
         
+        # Create service client once for reuse across batches
+        self.service_client = tinker.ServiceClient()
+        
         self.dataset = MinervaDataset(
             batch_size=group_size,
             group_size=group_size,
@@ -194,8 +184,7 @@ class MinervaEnvironment(Environment):
             return []
         
         # Create sampling client and policy
-        service_client = tinker.ServiceClient()
-        sampling_client = service_client.create_sampling_client(model_path=sampling_client_path)
+        sampling_client = self.service_client.create_sampling_client(model_path=sampling_client_path)
         policy = TinkerTokenCompleter(sampling_client, max_tokens=self.config.max_tokens)
         
         # Run rollouts with progress bar

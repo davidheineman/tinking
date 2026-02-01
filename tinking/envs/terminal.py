@@ -49,6 +49,9 @@ class TerminalBenchEnvironment(Environment):
         self.group_size = group_size
         self.renderer = renderer
         self.output_dir = output_dir
+        
+        # Create service client once for reuse across batches
+        self.service_client = ServiceClient()
     
     async def do_rollouts(
         self,
@@ -315,9 +318,8 @@ class TerminalBenchEnvironment(Environment):
         renderer: Renderer,
     ) -> list[TrajectoryGroup]:
         """ fill in logprobs for trajectories  """
-        # Create sampling client
-        service_client: ServiceClient = ServiceClient()
-        sampling_client: SamplingClient = service_client.create_sampling_client(
+        # Create sampling client (reuses self.service_client)
+        sampling_client: SamplingClient = self.service_client.create_sampling_client(
             model_path=sampling_client_path
         )
         
