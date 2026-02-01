@@ -8,20 +8,18 @@ from datetime import datetime
 from typing import Optional
 
 import chz
-from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 import wandb
 import tinker
 from rich.console import Console
-from tinker import SamplingClient, ServiceClient, types
+from tinker import types
 from tinker_cookbook import checkpoint_utils, model_info
 from tinker_cookbook.rl.data_processing import assemble_training_data, compute_advantages
-from tinker_cookbook.rl.types import TrajectoryGroup, Transition
 from tinker_cookbook.tokenizer_utils import get_tokenizer
-from tinker_cookbook.renderers import Renderer, get_renderer
+from tinker_cookbook.renderers import get_renderer
 
 from tinking.envs.base import Environment, EnvironmentConfig
-from tinking.envs.terminal import TerminalBenchConfig, TerminalBenchEnvironment
-from tinking.envs.minerva import MinervaConfig, MinervaEnvironment
+from tinking.envs.terminal import TerminalBenchEnvironment
+from tinking.envs.minerva import MinervaEnvironment
 
 console = Console()
 
@@ -71,72 +69,6 @@ class Config:
     base_url: str | None = None
 
 
-async def recompute_logprobs(
-    trajectory_groups: list[TrajectoryGroup],
-    sampling_client_path: str,
-    renderer: Renderer,
-) -> list[TrajectoryGroup]:
-    """ fill in logprobs for trajectories  """
-    # Create sampling client
-    service_client: ServiceClient = ServiceClient()
-    sampling_client: SamplingClient = service_client.create_sampling_client(
-        model_path=sampling_client_path
-    )
-    
-    logger.info("Re-computing logprobs for trajectories...")
-    
-    # Collect all transitions that need logprob computation
-    transitions_to_process = []
-    for traj_group in trajectory_groups:
-        for trajectory in traj_group.trajectories_G:
-            for transition in trajectory.transitions:
-                transitions_to_process.append(transition)
-    
-    async def process_transition(transition: Transition):
-        """ Compute logprobs on a single transititon """
-        sample_result = await sampling_client.sample_async(
-            prompt=transition.ob,
-            num_samples=1,
-            sampling_params=tinker.SamplingParams(
-                temperature=1.0,
-                max_tokens=len(transition.ac.tokens) + 100,
-                stop=renderer.get_stop_sequences(),
-            ),
-        )
-        
-        # Get logprobs from sampled sequence
-        sampled_logprobs = sample_result.sequences[0].logprobs
-        
-        # Match logprobs to the actual tokens taken
-        if sampled_logprobs and len(sampled_logprobs) >= len(transition.ac.tokens):
-            transition.ac.maybe_logprobs = sampled_logprobs[:len(transition.ac.tokens)]
-        else:
-            logger.warning(
-                f"Not enough logprobs: got {len(sampled_logprobs) if sampled_logprobs else 0}, "
-                f"need {len(transition.ac.tokens)}. Using zeros."
-            )
-            transition.ac.maybe_logprobs = [0.0] * len(transition.ac.tokens)
-    
-    # Process all transitions concurrently
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Computing logprobs...", total=len(transitions_to_process))
-        
-        # Process transitions and update progress
-        async def process_with_progress(transition):
-            result = await process_transition(transition)
-            progress.advance(task)
-            return result
-        
-        await asyncio.gather(*[process_with_progress(transition) for transition in transitions_to_process])
-    
-    logger.info("Finished re-computing logprobs")
-    return trajectory_groups
 
 
 async def setup_config(config: Config):
@@ -190,7 +122,7 @@ async def main(config: Config):
     renderer = get_renderer(renderer_name, tokenizer)
     logger.info(f"Using renderer: {renderer_name}")
     
-    # Init environemnt
+    # Init environment
     match config.env.name:
         case "minerva":
             env: Environment = MinervaEnvironment(
@@ -242,11 +174,6 @@ async def main(config: Config):
         trajectory_groups = await env.do_rollouts(
             sampling_client_path=sampling_path,
             batch_idx=batch_idx,
-        )
-        
-        # Fill in logprobs using the sampling client
-        trajectory_groups = await recompute_logprobs(
-            trajectory_groups, sampling_path, renderer
         )
         
         # Check if we got any trajectories
@@ -377,4 +304,3 @@ def main_sync(config: Config):
 
 if __name__ == "__main__":
     chz.nested_entrypoint(main_sync, allow_hyphens=True)
-

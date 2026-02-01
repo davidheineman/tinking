@@ -1,20 +1,20 @@
 import asyncio
-import logging
-import random
+import math
 from dataclasses import dataclass
-from typing import Any, Literal
-
-from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from functools import partial
+from typing import Literal, Sequence
 
 import tinker
-from tinker import SamplingClient, ServiceClient
-from tinker_cookbook.completers import TokensWithLogprobs
-from tinker_cookbook.renderers import Renderer
-from tinker_cookbook.rl.types import TrajectoryGroup, Trajectory, Transition
+from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from tinker_cookbook import renderers
+from tinker_cookbook.completers import TinkerTokenCompleter
+from tinker_cookbook.rl.problem_env import ProblemEnv, ProblemGroupBuilder, logger
+from tinker_cookbook.rl.rollouts import do_group_rollout
+from tinker_cookbook.rl.types import EnvGroupBuilder, RLDataset, TrajectoryGroup
 
 from minieval.tasks.minerva import MinervaMath, Math500
-from minieval.datatypes import TaskConfig as MiniEvalTaskConfig, Instance, LMOutput
+from minieval.datatypes import TaskConfig as MiniEvalTaskConfig, LMOutput
 from minieval.score.core import ExactMatchFlex
 from minieval.extract.math_latex import MathExtractor
 from minieval.formatters import CoT
@@ -22,19 +22,141 @@ from minieval.formatters import CoT
 from tinking.envs.base import Environment, EnvironmentConfig
 
 console = Console()
-logger = logging.getLogger(__name__)
 
 
 @dataclass
 class MinervaConfig(EnvironmentConfig):
+    """Config for Minerva math environment."""
     name: Literal["minerva"] = "minerva"
-    model_name: str = ""
     dataset: Literal["minerva", "math500"] = "minerva"
-    subset: str | None = None  # For minerva dataset, e.g., "algebra"
+    subset: str | None = None
+    seed: int = 0
     max_tokens: int = 2048
-    temperature: float = 0.7
-    n_concurrent: int = 1
-    num_questions_per_batch: int = 4  # How many questions to sample per batch
+
+
+class MinervaEnv(ProblemEnv):
+    def __init__(
+        self,
+        problem: str,
+        answer: str,
+        renderer: renderers.Renderer,
+        convo_prefix: list[renderers.Message] | None = None,
+    ):
+        super().__init__(renderer, convo_prefix)
+        self.problem = problem
+        self.answer = answer
+    
+    @classmethod
+    def question_suffix(cls) -> str:
+        return " Present the answer in LaTeX format: \\boxed{Your answer}"
+    
+    def get_question(self) -> str:
+        return self.problem + self.question_suffix()
+    
+    def check_format(self, sample_str: str) -> bool:
+        answers = MathExtractor.extract_answer(sample_str)
+        has_answers = bool(len(answers) > 0)
+        return has_answers
+    
+    def check_answer(self, sample_str: str) -> bool:
+        lm_output = LMOutput(text=sample_str)
+        lm_output.extracted_answer = MathExtractor.extract_answer(sample_str)
+        
+        # Create a minimal instance-like object for scoring
+        class MinimalInstance:
+            def __init__(self, answer: str):
+                self.answer = answer
+        
+        scorer = ExactMatchFlex()
+        score = scorer._score_response_single(MinimalInstance(self.answer), lm_output)
+        return bool(score > 0)
+    
+    def get_reference_answer(self) -> str:
+        return self.answer
+
+
+class MinervaDataset(RLDataset):
+    """Dataset that provides batches of Minerva math problems."""
+    
+    def __init__(
+        self,
+        batch_size: int,
+        group_size: int,
+        renderer: renderers.Renderer,
+        convo_prefix: list[renderers.Message] | None = None,
+        dataset: Literal["minerva", "math500"] = "minerva",
+        subset: str | None = None,
+        seed: int = 0,
+    ):
+        self.batch_size = batch_size
+        self.group_size = group_size
+        self.renderer = renderer
+        self.convo_prefix = convo_prefix
+        
+        # Load dataset via minieval
+        task = self._create_task(dataset, subset)
+        self.instances = list(task.requests)
+        
+        # Shuffle with seed
+        import random
+        rng = random.Random(seed)
+        rng.shuffle(self.instances)
+    
+    def _create_task(self, dataset: str, subset: str | None):
+        """Create minieval task to load the dataset."""
+        task_config = MiniEvalTaskConfig(
+            alias="minerva_rl",
+            formatter=CoT(instruction=""),
+            scorer=[ExactMatchFlex()],
+            metric=[],
+            subset=subset,
+        )
+        
+        if dataset == "math500":
+            return Math500(task_config)
+        else:
+            return MinervaMath(task_config)
+    
+    def get_batch(self, index: int) -> Sequence[EnvGroupBuilder]:
+        batch_start = index * self.batch_size
+        batch_end = min((index + 1) * self.batch_size, len(self.instances))
+        
+        if batch_start >= len(self.instances):
+            # Wrap around for continuous training
+            batch_start = batch_start % len(self.instances)
+            batch_end = min(batch_start + self.batch_size, len(self.instances))
+        
+        builders = []
+        for instance in self.instances[batch_start:batch_end]:
+            builder = self._make_env_group_builder(instance)
+            if builder is not None:
+                builders.append(builder)
+        
+        return builders
+    
+    def _make_env_group_builder(self, instance) -> ProblemGroupBuilder | None:
+        """Create an EnvGroupBuilder for a single problem."""
+        problem = instance.question
+        answer = instance.answer
+        
+        if not problem or not answer:
+            logger.warning(f"Skipping instance with missing problem/answer")
+            return None
+        
+        return ProblemGroupBuilder(
+            env_thunk=partial(
+                MinervaEnv,
+                problem,
+                answer,
+                self.renderer,
+                convo_prefix=self.convo_prefix,
+            ),
+            num_envs=self.group_size,
+            dataset_name="minerva",
+        )
+    
+    def __len__(self) -> int:
+        return math.ceil(len(self.instances) / self.batch_size)
 
 
 class MinervaEnvironment(Environment):
@@ -42,150 +164,41 @@ class MinervaEnvironment(Environment):
         self,
         config: MinervaConfig,
         group_size: int,
-        renderer: Renderer,
+        renderer: renderers.Renderer,
         output_dir: str,
     ):
         self.config = config
         self.group_size = group_size
         self.renderer = renderer
         self.output_dir = output_dir
+        
+        self.dataset = MinervaDataset(
+            batch_size=group_size,
+            group_size=group_size,
+            renderer=renderer,
+            dataset=config.dataset,
+            subset=config.subset,
+            seed=config.seed,
+        )
     
     async def do_rollouts(
         self,
         sampling_client_path: str,
         batch_idx: int,
     ) -> list[TrajectoryGroup]:
-        rollouts, rewards = await self._run_minerva_rollouts(
-            config=self.config,
-            sampling_client_path=sampling_client_path,
-            group_size=self.group_size,
-            renderer=self.renderer,
-        )
+        # Get env group builders for this batch
+        env_group_builders = self.dataset.get_batch(batch_idx)
         
-        if not rollouts:
-            logger.warning("No rollouts generated!")
+        if not env_group_builders:
+            logger.warning("No env group builders for this batch")
             return []
         
-        # Convert to trajectory groups
-        trajectory_groups = self._rollouts_to_trajectory_groups(
-            rollouts, rewards, self.group_size, self.renderer
-        )
+        # Create sampling client and policy
+        service_client = tinker.ServiceClient()
+        sampling_client = service_client.create_sampling_client(model_path=sampling_client_path)
+        policy = TinkerTokenCompleter(sampling_client, max_tokens=self.config.max_tokens)
         
-        return trajectory_groups
-
-
-    def _create_minieval_task(self, config: MinervaConfig) -> MinervaMath | Math500:
-        """Create a minieval task for loading the dataset."""
-        # Create a minimal TaskConfig for minieval
-        task_config = MiniEvalTaskConfig(
-            alias="minerva_rl",
-            formatter=CoT(instruction="Present the answer in LaTex format: \\boxed{Your answer}"),
-            scorer=[ExactMatchFlex()],
-            metric=[],
-            subset=config.subset,
-        )
-        
-        match config.dataset:
-            case "math500":
-                return Math500(task_config)
-            case "minerva":
-                return MinervaMath(task_config)
-            case other:
-                raise ValueError(f"Unknown dataset: {other!r}")
-
-
-    def _grade_response(
-        self, 
-        instance: Instance, 
-        response_text: str
-    ) -> float:
-        lm_output = LMOutput(text=response_text)
-        
-        extracted_answers = MathExtractor.extract_answer(response_text)
-        lm_output.extracted_answer = extracted_answers
-
-        scorer = ExactMatchFlex()
-        score = scorer._score_response_single(instance, lm_output)
-        
-        return score
-
-
-    async def _run_minerva_rollouts(
-        self,
-        config: MinervaConfig,
-        sampling_client_path: str,
-        group_size: int,
-        renderer: Renderer,
-    ) -> tuple[list[dict[str, Any]], list[float]]:
-        """Run rollouts on Minerva math problems."""
-        
-        # Create minieval task to load dataset
-        task = self._create_minieval_task(config)
-        
-        # Get all instances (questions) from the task
-        all_instances: list[Instance] = task.requests
-        
-        # Sample questions for this batch
-        sampled_instances = random.sample(
-            all_instances, 
-            min(config.num_questions_per_batch, len(all_instances))
-        )
-        
-        # Create sampling client
-        service_client: ServiceClient = ServiceClient()
-        sampling_client: SamplingClient = service_client.create_sampling_client(
-            model_path=sampling_client_path
-        )
-        
-        rollouts = []
-        rewards = []
-        
-        async def process_instance(instance: Instance, num_samples: int):
-            """Generate samples for a single question."""
-            # Use the task's formatter to build the message
-            formatter = task.config.formatter
-            lm_request = formatter._build_message(instance)
-            messages = lm_request.messages
-            
-            prompt = renderer.build_generation_prompt(messages)
-            
-            # Generate multiple samples for this question
-            sample_result = await sampling_client.sample_async(
-                prompt=prompt,
-                num_samples=num_samples,
-                sampling_params=tinker.SamplingParams(
-                    temperature=config.temperature,
-                    max_tokens=config.max_tokens,
-                    stop=renderer.get_stop_sequences(),
-                ),
-            )
-            
-            instance_rollouts = []
-            instance_rewards = []
-            
-            for seq in sample_result.sequences:
-                response_text = renderer.tokenizer.decode(seq.tokens)
-                
-                # Build the full conversation
-                full_messages = messages + [{"role": "assistant", "content": response_text}]
-                
-                # Grade the response using MathExtractor + ExactMatchFlex
-                reward = self._grade_response(instance, response_text)
-                
-                instance_rollouts.append({
-                    "messages": full_messages,
-                    "instance": instance,
-                    "response": response_text,
-                    "tokens": seq.tokens,
-                    "logprobs": seq.logprobs,
-                })
-                instance_rewards.append(reward)
-            
-            return instance_rollouts, instance_rewards
-        
-        # Determine samples per question to reach group_size total
-        samples_per_question = max(1, group_size // len(sampled_instances))
-        
+        # Run rollouts with progress bar
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -193,103 +206,15 @@ class MinervaEnvironment(Environment):
             TaskProgressColumn(),
             console=console,
         ) as progress:
-            prog_task = progress.add_task("Generating math solutions...", total=len(sampled_instances))
+            task = progress.add_task("Running rollouts...", total=len(env_group_builders))
             
-            # Process questions concurrently
-            async def process_with_progress(instance: Instance):
-                result = await process_instance(instance, samples_per_question)
-                progress.advance(prog_task)
+            async def rollout_with_progress(builder):
+                result = await do_group_rollout(builder, policy)
+                progress.advance(task)
                 return result
             
-            results = await asyncio.gather(*[
-                process_with_progress(inst) for inst in sampled_instances
+            trajectory_groups: list[TrajectoryGroup] = await asyncio.gather(*[
+                rollout_with_progress(builder) for builder in env_group_builders
             ])
-            
-            for inst_rollouts, inst_rewards in results:
-                rollouts.extend(inst_rollouts)
-                rewards.extend(inst_rewards)
-        
-        logger.info(f"Generated {len(rollouts)} rollouts, mean reward: {sum(rewards)/len(rewards):.3f}")
-        
-        return rollouts, rewards
-
-
-    def _rollouts_to_trajectory_groups(
-        self,
-        rollouts: list[dict[str, Any]], 
-        rewards: list[float],
-        group_size: int,
-        renderer: Renderer,
-    ) -> list[TrajectoryGroup]:
-        """Convert rollouts to TrajectoryGroups."""
-        if len(rollouts) != len(rewards):
-            raise ValueError(f"Length mismatch: {len(rollouts)} rollouts but {len(rewards)} rewards")
-        
-        # Convert each rollout to a Trajectory
-        trajectories = []
-        for rollout in rollouts:
-            messages = rollout.get("messages", [])
-            tokens = rollout.get("tokens", [])
-            logprobs = rollout.get("logprobs", [])
-            
-            trajectory = self._messages_to_trajectory(messages, tokens, logprobs, renderer)
-            trajectories.append(trajectory)
-        
-        # Group trajectories into TrajectoryGroups
-        trajectory_groups = []
-        for i in range(0, len(trajectories), group_size):
-            group_trajectories = trajectories[i:i+group_size]
-            group_rewards = rewards[i:i+group_size]
-            
-            # Create metrics dict for each trajectory
-            group_metrics = [{} for _ in group_trajectories]
-            
-            trajectory_group = TrajectoryGroup(
-                trajectories_G=group_trajectories,
-                final_rewards_G=group_rewards,
-                metrics_G=group_metrics,
-            )
-            trajectory_groups.append(trajectory_group)
         
         return trajectory_groups
-
-
-    def _messages_to_trajectory(
-        self,
-        messages: list[dict[str, Any]], 
-        tokens: list[int],
-        logprobs: list[float],
-        renderer: Renderer,
-    ) -> Trajectory:
-        """Convert messages to a Trajectory with logprobs."""
-        transitions = []
-        
-        # Find the user message index (skip system message)
-        user_idx = None
-        for i, msg in enumerate(messages):
-            if msg["role"] == "user":
-                user_idx = i
-                break
-        
-        if user_idx is not None and user_idx + 1 < len(messages):
-            # Observation: conversation up to and including user message
-            ob = renderer.build_generation_prompt(messages[:user_idx + 1])
-            
-            # Action: tokenized assistant response
-            ac = TokensWithLogprobs(
-                tokens=tokens,
-                maybe_logprobs=logprobs if logprobs else None
-            )
-            
-            transitions.append(Transition(
-                ob=ob,
-                ac=ac,
-                reward=0.0,  # Final reward is in TrajectoryGroup
-                episode_done=True,  # Single turn for math problems
-                metrics={},
-            ))
-        
-        return Trajectory(
-            transitions=transitions,
-            final_ob=renderer.build_generation_prompt(messages)
-        )

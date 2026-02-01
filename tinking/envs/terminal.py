@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import random
 import subprocess
@@ -10,6 +11,8 @@ from concurrent.futures import ThreadPoolExecutor
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
+from tinker import SamplingClient, ServiceClient
+import tinker
 from tinker_cookbook.rl.types import TrajectoryGroup, Trajectory, Transition
 from tinker_cookbook.completers import TokensWithLogprobs
 from tinker_cookbook.renderers import Renderer
@@ -52,7 +55,7 @@ class TerminalBenchEnvironment(Environment):
         sampling_client_path: str,
         batch_idx: int,
     ) -> list[TrajectoryGroup]:
-        return self._do_terminalbench_rollouts(
+        trajectory_groups = self._do_terminalbench_rollouts(
             config=self.config,
             sampling_client_path=sampling_client_path,
             batch_idx=batch_idx,
@@ -61,6 +64,13 @@ class TerminalBenchEnvironment(Environment):
             grader_model=self.config.grader_model,
             output_dir=self.output_dir,
         )
+
+        # Fill in logprobs using the sampling client
+        trajectory_groups = await self._recompute_logprobs(
+            trajectory_groups, sampling_client_path, self.renderer
+        )
+
+        return trajectory_groups
 
     
     def _do_terminalbench_rollouts(
@@ -297,3 +307,71 @@ class TerminalBenchEnvironment(Environment):
             transitions=transitions,
             final_ob=renderer.build_generation_prompt(messages)
         )
+
+    async def _recompute_logprobs(
+        self,
+        trajectory_groups: list[TrajectoryGroup],
+        sampling_client_path: str,
+        renderer: Renderer,
+    ) -> list[TrajectoryGroup]:
+        """ fill in logprobs for trajectories  """
+        # Create sampling client
+        service_client: ServiceClient = ServiceClient()
+        sampling_client: SamplingClient = service_client.create_sampling_client(
+            model_path=sampling_client_path
+        )
+        
+        logger.info("Re-computing logprobs for trajectories...")
+        
+        # Collect all transitions that need logprob computation
+        transitions_to_process = []
+        for traj_group in trajectory_groups:
+            for trajectory in traj_group.trajectories_G:
+                for transition in trajectory.transitions:
+                    transitions_to_process.append(transition)
+        
+        async def process_transition(transition: Transition):
+            """ Compute logprobs on a single transititon """
+            sample_result = await sampling_client.sample_async(
+                prompt=transition.ob,
+                num_samples=1,
+                sampling_params=tinker.SamplingParams(
+                    temperature=1.0,
+                    max_tokens=len(transition.ac.tokens) + 100,
+                    stop=renderer.get_stop_sequences(),
+                ),
+            )
+            
+            # Get logprobs from sampled sequence
+            sampled_logprobs = sample_result.sequences[0].logprobs
+            
+            # Match logprobs to the actual tokens taken
+            if sampled_logprobs and len(sampled_logprobs) >= len(transition.ac.tokens):
+                transition.ac.maybe_logprobs = sampled_logprobs[:len(transition.ac.tokens)]
+            else:
+                logger.warning(
+                    f"Not enough logprobs: got {len(sampled_logprobs) if sampled_logprobs else 0}, "
+                    f"need {len(transition.ac.tokens)}. Using zeros."
+                )
+                transition.ac.maybe_logprobs = [0.0] * len(transition.ac.tokens)
+        
+        # Process all transitions concurrently
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Computing logprobs...", total=len(transitions_to_process))
+            
+            # Process transitions and update progress
+            async def process_with_progress(transition):
+                result = await process_transition(transition)
+                progress.advance(task)
+                return result
+            
+            await asyncio.gather(*[process_with_progress(transition) for transition in transitions_to_process])
+        
+        logger.info("Finished re-computing logprobs")
+        return trajectory_groups
