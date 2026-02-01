@@ -16,7 +16,9 @@ dependencies = [
     "tinker",
     "wandb",
 
-    "beaker-gantry"
+    "beaker-gantry",
+
+    "minieval==0.2.7",
 ]
 
 # [tool.uv.sources]

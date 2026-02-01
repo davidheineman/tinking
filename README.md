@@ -46,7 +46,16 @@ minitb run \
 ### test trainer
 
 ```sh
-# RL on hello world
+# RL on MATH 500
+python tinking/trainer.py \
+  model_name=Qwen/Qwen3-8B \
+  num_batches=5 \
+  group_size=4 \
+  wandb.enabled=False \
+  env=MinervaConfig \
+  env.dataset=math500
+
+# RL on terminal hello world
 python tinking/trainer.py \
   model_name=Qwen/Qwen3-8B \
   num_batches=5 \

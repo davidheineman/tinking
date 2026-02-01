@@ -19,7 +19,9 @@ from tinker_cookbook.rl.types import TrajectoryGroup, Transition
 from tinker_cookbook.tokenizer_utils import get_tokenizer
 from tinker_cookbook.renderers import Renderer, get_renderer
 
-from tb_rollouts import MinitbConfig, do_terminalbench_rollouts
+from tinking.envs.base import Environment, EnvironmentConfig
+from tinking.envs.terminal import TerminalBenchConfig, TerminalBenchEnvironment
+from tinking.envs.minerva import MinervaConfig, MinervaEnvironment
 
 console = Console()
 
@@ -47,9 +49,8 @@ class Config:
     lr: float = 1e-4
     num_batches: int = 100
     
-    # minitb config
-    minitb: MinitbConfig = chz.field(default_factory=MinitbConfig)
-    grader_model: str = "random"
+    # environment config
+    env: EnvironmentConfig = chz.field(default_factory=EnvironmentConfig)
     
     # wandb config
     wandb: WandbConfig = chz.field(default_factory=WandbConfig)
@@ -129,9 +130,9 @@ async def recompute_logprobs(
 
 
 async def setup_config(config: Config):
-    # Override model_name in minitb config to match training model
-    config.minitb.model_name = config.model_name
-    config.minitb.n_concurrent = config.group_size
+    # Override model_name in env config to match training model
+    config.env.model_name = config.model_name
+    config.env.n_concurrent = config.group_size
     
     # Get logging path
     run_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -179,6 +180,25 @@ async def main(config: Config):
     renderer = get_renderer(renderer_name, tokenizer)
     logger.info(f"Using renderer: {renderer_name}")
     
+    # Init environemnt
+    match config.env.name:
+        case "minerva":
+            env: Environment = MinervaEnvironment(
+                config=config.env,
+                group_size=config.group_size,
+                renderer=renderer,
+                output_dir=rollouts_dir,
+            )
+        case "terminal":
+            env: Environment = TerminalBenchEnvironment(
+                config=config.env,
+                group_size=config.group_size,
+                renderer=renderer,
+                output_dir=rollouts_dir,
+            )
+        case _:
+            raise ValueError(f"Unknown environment name: {config.env.name!r}")
+    
     # Setup training client
     service_client = tinker.ServiceClient(base_url=config.base_url)
     
@@ -208,15 +228,10 @@ async def main(config: Config):
         logger.info(f"Batch {batch_idx}/{config.num_batches}")
         step_start_time = time.time()
         
-        # Run TerminalBench rollouts
-        trajectory_groups = do_terminalbench_rollouts(
-            config=config.minitb,
+        # Run environment rollouts
+        trajectory_groups = await env.do_rollouts(
             sampling_client_path=sampling_path,
             batch_idx=batch_idx,
-            group_size=config.group_size,
-            renderer=renderer,
-            grader_model=config.grader_model,
-            output_dir=rollouts_dir,
         )
         
         # Fill in logprobs using the sampling client
@@ -236,11 +251,9 @@ async def main(config: Config):
             if len(set(rewards)) > 1:  # Has variance
                 trajectory_groups_filtered.append(group)
         
-        # TODO: For now, I want to just train on zero varaince rewards anyways. (I think I can do this?)
-        
-        # if not trajectory_groups_filtered:
-        #     logger.warning("All rewards are uniform. Skipping batch.")
-        #     continue
+        if not trajectory_groups_filtered:
+            logger.warning("All rewards are uniform. Skipping batch.")
+            continue
         
         # Compute advantages
         advantages_P = compute_advantages(trajectory_groups_filtered)
