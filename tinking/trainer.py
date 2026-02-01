@@ -39,6 +39,14 @@ class WandbConfig:
 
 
 @chz.chz
+class OptimConfig:
+    lr: float = 1e-4
+    beta1: float = 0.9
+    beta2: float = 0.95
+    eps: float = 1e-8
+
+
+@chz.chz
 class Config:    
     # model config
     model_name: str = "meta-llama/Llama-3.2-1B"
@@ -46,8 +54,10 @@ class Config:
     
     # hparams
     group_size: int = 4
-    lr: float = 1e-4
     num_batches: int = 100
+    
+    # optimizer config
+    optim: OptimConfig = chz.field(default_factory=OptimConfig)
     
     # environment config
     env: EnvironmentConfig = chz.field(default_factory=EnvironmentConfig)
@@ -280,7 +290,10 @@ async def main(config: Config):
         
         # Optimizer step
         adam_params = types.AdamParams(
-            learning_rate=config.lr, beta1=0.9, beta2=0.95, eps=1e-8
+            lr=config.optim.lr,
+            beta1=config.optim.beta1,
+            beta2=config.optim.beta2,
+            eps=config.optim.eps,
         )
         await training_client.optim_step_async(adam_params)
         
@@ -328,7 +341,7 @@ async def main(config: Config):
                 "reward/variance": reward_variance,
                 "tokens/total": total_tokens,
                 "tokens/avg_per_rollout": avg_tokens_per_rollout,
-                "train/learning_rate": config.lr,
+                "train/lr": config.optim.lr,
                 "time/step_seconds": step_time,
             }, step=batch_idx)
         

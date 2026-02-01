@@ -94,7 +94,11 @@ class MinervaEnvironment(Environment):
                 raise ValueError(f"Unknown dataset: {other!r}")
 
 
-    def _grade_response(self, instance: Instance, response_text: str) -> float:
+    def _grade_response(
+        self, 
+        instance: Instance, 
+        response_text: str
+    ) -> float:
         lm_output = LMOutput(text=response_text)
         
         extracted_answers = MathExtractor.extract_answer(response_text)
@@ -251,6 +255,7 @@ class MinervaEnvironment(Environment):
 
 
     def _messages_to_trajectory(
+        self,
         messages: list[dict[str, Any]], 
         tokens: list[int],
         logprobs: list[float],

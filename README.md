@@ -46,12 +46,15 @@ minitb run \
 ### test trainer
 
 ```sh
-# RL on MATH 500
+# RL on MATH 500 + wandb
 python tinking/trainer.py \
   model_name=Qwen/Qwen3-8B \
   num_batches=5 \
   group_size=4 \
-  wandb.enabled=False \
+  wandb.enabled=True \
+  wandb.entity=ai2-llm \
+  wandb.project=tinker \
+  wandb.run_name=debug-math-500 \
   env=MinervaConfig \
   env.dataset=math500
 
