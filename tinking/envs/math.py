@@ -39,7 +39,7 @@ class HFInstance:
 class MathConfig(EnvironmentConfig):
     """Config for Minerva math environment."""
     name: Literal["minerva"] = "minerva"
-    dataset: Literal["minerva", "math500", "dolci", "nemotron", "dolci_think"] = "minerva"
+    dataset: Literal["minerva", "math500", "olmo3_rlzero_7b", "olmo3_rl_32b", "nemotron", "deepmath", "polaris"] = "minerva"
     subset: str | None = None
     seed: int = 0
     max_tokens: int = 2048
@@ -122,6 +122,22 @@ class MathDataset(RLDataset):
                     HFInstance(question=row["prompt"], solution=row["ground_truth"][0])
                     for row in ds
                     if "math" in row["dataset"]
+                ]
+            case "deepmath":
+                ds = load_dataset("zwhe99/DeepMath-103K", split="train")
+                # Sort by difficulty descending and take top 1K
+                ds = ds.sort("difficulty", reverse=True).select(range(1000))
+                return [
+                    HFInstance(question=row["question"], solution=row["final_answer"])
+                    for row in ds
+                ]
+            case "polaris":
+                ds = load_dataset("POLARIS-Project/Polaris-Dataset-53K", split="train")
+                # Filter to hardest problems (0/8 or 1/8 pass rate)
+                return [
+                    HFInstance(question=row["problem"], solution=row["answer"])
+                    for row in ds
+                    if row["difficulty"] in ("0/8", "1/8")
                 ]
             case "math500" | "minerva":
                 task_config = MiniEvalTaskConfig(

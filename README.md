@@ -146,7 +146,7 @@ python tinking/trainer.py \
   wandb.project=tinker \
   wandb.run_name=debug-math-500 \
   env=MathConfig \
-  env.dataset=olmo3_rl_32b \
+  env.dataset=polaris \
   env.max_tokens=16384
 
 # big run
