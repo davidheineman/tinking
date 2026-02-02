@@ -2,6 +2,7 @@ import asyncio
 import math
 from dataclasses import dataclass
 from functools import partial
+import random
 from typing import Literal, Sequence
 
 import tinker
@@ -13,6 +14,7 @@ from tinker_cookbook.rl.problem_env import ProblemEnv, ProblemGroupBuilder, logg
 from tinker_cookbook.rl.rollouts import do_group_rollout
 from tinker_cookbook.rl.types import EnvGroupBuilder, RLDataset, TrajectoryGroup
 
+from datasets import load_dataset
 from minieval.tasks.minerva import Instance, MinervaMath, Math500
 from minieval.datatypes import TaskConfig as MiniEvalTaskConfig, LMOutput
 from minieval.score.core import ExactMatchFlex
@@ -23,18 +25,27 @@ from tinking.envs.base import Environment, EnvironmentConfig
 
 console = Console()
 
+@dataclass
+class HFInstance:
+    question: str
+    solution: str
+    
+    @property
+    def answer(self) -> list[str]:
+        return [self.solution]
+
 
 @dataclass
-class MinervaConfig(EnvironmentConfig):
+class MathConfig(EnvironmentConfig):
     """Config for Minerva math environment."""
     name: Literal["minerva"] = "minerva"
-    dataset: Literal["minerva", "math500"] = "minerva"
+    dataset: Literal["minerva", "math500", "dolci", "nemotron", "dolci_think"] = "minerva"
     subset: str | None = None
     seed: int = 0
     max_tokens: int = 2048
 
 
-class MinervaEnv(ProblemEnv):
+class MathEnv(ProblemEnv):
     def __init__(
         self,
         instance: Instance,
@@ -67,9 +78,7 @@ class MinervaEnv(ProblemEnv):
         return str(self.instance.solution)
 
 
-class MinervaDataset(RLDataset):
-    """Dataset that provides batches of Minerva math problems."""
-    
+class MathDataset(RLDataset):
     def __init__(
         self,
         batch_size: int,
@@ -85,29 +94,50 @@ class MinervaDataset(RLDataset):
         self.renderer = renderer
         self.convo_prefix = convo_prefix
         
-        # Load dataset via minieval
-        task = self._create_task(dataset, subset)
-        self.instances: list[Instance] = list(task.requests)
+        # Load data
+        self.instances = self._load_instances(dataset, subset)
         
-        # Shuffle with seed
-        import random
+        # Shuffle
         rng = random.Random(seed)
         rng.shuffle(self.instances)
     
-    def _create_task(self, dataset: str, subset: str | None):
-        """Create minieval task to load the dataset."""
-        task_config = MiniEvalTaskConfig(
-            alias="minerva_rl",
-            formatter=CoT(instruction=""),
-            scorer=[ExactMatchFlex()],
-            metric=[],
-            subset=subset,
-        )
-        
-        if dataset == "math500":
-            return Math500(task_config)
-        else:
-            return MinervaMath(task_config)
+    def _load_instances(self, dataset: str, subset: str | None) -> list:
+        match dataset:
+            case "olmo3_rlzero_7b":
+                ds = load_dataset("allenai/Dolci-RL-Zero-Math-7B", split="train")
+                return [
+                    HFInstance(question=row["prompt"], solution=row["ground_truth"])
+                    for row in ds
+                ]
+            case "nemotron":
+                nemotron_subset = subset or "high_part02"
+                ds = load_dataset("nvidia/Nemotron-Math-v2", split=f"{nemotron_subset}")
+                return [
+                    HFInstance(question=row["problem"], solution=row["expected_answer"])
+                    for row in ds
+                ]
+            case "olmo3_rl_32b":
+                ds = load_dataset("allenai/Dolci-Think-RL-32B", split="train")
+                return [
+                    HFInstance(question=row["prompt"], solution=row["ground_truth"][0])
+                    for row in ds
+                    if "math" in row["dataset"]
+                ]
+            case "math500" | "minerva":
+                task_config = MiniEvalTaskConfig(
+                    alias="minerva_rl",
+                    formatter=CoT(instruction=""),
+                    scorer=[ExactMatchFlex()],
+                    metric=[],
+                    subset=subset,
+                )
+                if dataset == "math500":
+                    task = Math500(task_config)
+                else:
+                    task = MinervaMath(task_config)
+                return list(task.requests)
+            case _:
+                raise ValueError(f"Unknown dataset: {dataset}")
     
     def get_batch(self, index: int) -> Sequence[EnvGroupBuilder]:
         batch_start = index * self.batch_size
@@ -133,7 +163,7 @@ class MinervaDataset(RLDataset):
         
         return ProblemGroupBuilder(
             env_thunk=partial(
-                MinervaEnv,
+                MathEnv,
                 instance,
                 self.renderer,
                 convo_prefix=self.convo_prefix,
@@ -146,10 +176,10 @@ class MinervaDataset(RLDataset):
         return math.ceil(len(self.instances) / self.batch_size)
 
 
-class MinervaEnvironment(Environment):
+class MathEnvironment(Environment):
     def __init__(
         self,
-        config: MinervaConfig,
+        config: MathConfig,
         batch_size: int,
         group_size: int,
         renderer: renderers.Renderer,
@@ -164,7 +194,7 @@ class MinervaEnvironment(Environment):
         # Create service client once for reuse across batches
         self.service_client = tinker.ServiceClient()
         
-        self.dataset = MinervaDataset(
+        self.dataset = MathDataset(
             batch_size=batch_size,
             group_size=group_size,
             renderer=renderer,

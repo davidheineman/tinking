@@ -55,7 +55,7 @@ python tinking/trainer.py \
   wandb.entity=ai2-llm \
   wandb.project=tinker \
   wandb.run_name=debug-math-500 \
-  env=MinervaConfig \
+  env=MathConfig \
   env.dataset=math500 \
   env.max_tokens=2048
 
@@ -130,7 +130,7 @@ python tinking/trainer.py \
   minitb.dataset="terminal-bench-core==0.1.1" \
   minitb.task_id=hello-world
 
-# RL on MATH 500
+# RL on Olmo 3 Math mix
 python tinking/beaker/launch.py \
   workspace=ai2/davidh \
   budget=ai2/oe-base \
@@ -145,8 +145,8 @@ python tinking/trainer.py \
   wandb.entity=ai2-llm \
   wandb.project=tinker \
   wandb.run_name=debug-math-500 \
-  env=MinervaConfig \
-  env.dataset=math500 \
+  env=MathConfig \
+  env.dataset=olmo3_rl_32b \
   env.max_tokens=16384
 
 # big run

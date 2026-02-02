@@ -20,7 +20,7 @@ from tinker_cookbook.renderers import get_renderer
 
 from tinking.envs.base import Environment, EnvironmentConfig
 from tinking.envs.terminal import TerminalBenchEnvironment
-from tinking.envs.minerva import MinervaEnvironment
+from tinking.envs.math import MathEnvironment
 from tinking.logs import log_batch_info
 
 console = Console()
@@ -127,7 +127,7 @@ async def main(config: Config):
     # Init environment
     match config.env.name:
         case "minerva":
-            env: Environment = MinervaEnvironment(
+            env: Environment = MathEnvironment(
                 config=config.env,
                 batch_size=config.batch_size,
                 group_size=config.group_size,
