@@ -1,4 +1,5 @@
 import logging
+import numpy as np
 from tinker_cookbook.rl.types import TrajectoryGroup
 from tinker_cookbook.tokenizer_utils import Tokenizer
 from rich.console import Console
@@ -27,12 +28,9 @@ def log_batch_info(
     if not trajectory_groups:
         return
 
-    # Collect all rewards
-    all_rewards = []
-    for group in trajectory_groups:
-        all_rewards.extend(group.get_total_rewards())
-
-    logger.info(f"Rewards: {all_rewards}")
+    # Print rewards as [num_problems x group_size]
+    rewards_2d = np.array([group.get_total_rewards() for group in trajectory_groups])
+    logger.info(f"Rewards ({rewards_2d.shape[0]} problems × {rewards_2d.shape[1]} rollouts):\n{rewards_2d}")
 
     # Log example trajectories
     for i, group in enumerate(trajectory_groups[:num_examples]):
@@ -40,7 +38,7 @@ def log_batch_info(
             continue
 
         traj = group.trajectories_G[0]
-        reward = group.final_rewards_G[0]
+        reward = group.get_total_rewards()[0]
 
         if not traj.transitions:
             continue

@@ -52,6 +52,7 @@ class Config:
     lora_rank: int = 32
     
     # hparams
+    batch_size: int = 1
     group_size: int = 4
     num_batches: int = 100
     
@@ -128,6 +129,7 @@ async def main(config: Config):
         case "minerva":
             env: Environment = MinervaEnvironment(
                 config=config.env,
+                batch_size=config.batch_size,
                 group_size=config.group_size,
                 renderer=renderer,
                 output_dir=rollouts_dir,
@@ -135,6 +137,7 @@ async def main(config: Config):
         case "terminal":
             env: Environment = TerminalBenchEnvironment(
                 config=config.env,
+                batch_size=config.batch_size,
                 group_size=config.group_size,
                 renderer=renderer,
                 output_dir=rollouts_dir,
@@ -286,6 +289,8 @@ async def main(config: Config):
                 kind="both",
             )
     
+    logger.info("Saving final checkpoint...")
+
     # Save final checkpoint
     await checkpoint_utils.save_checkpoint_async(
         training_client=training_client,

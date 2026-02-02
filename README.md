@@ -56,7 +56,8 @@ python tinking/trainer.py \
   wandb.project=tinker \
   wandb.run_name=debug-math-500 \
   env=MinervaConfig \
-  env.dataset=math500
+  env.dataset=math500 \
+  env.max_tokens=2048
 
 # RL on terminal hello world
 python tinking/trainer.py \
@@ -128,6 +129,25 @@ python tinking/trainer.py \
   wandb.run_name=debug-hello-world \
   minitb.dataset="terminal-bench-core==0.1.1" \
   minitb.task_id=hello-world
+
+# RL on MATH 500
+python tinking/beaker/launch.py \
+  workspace=ai2/davidh \
+  budget=ai2/oe-base \
+  follow=true \
+  allow_dirty=true \
+  -- \
+python tinking/trainer.py \
+  model_name=Qwen/Qwen3-4B-Instruct-2507 \
+  num_batches=100 \
+  group_size=16 \
+  wandb.enabled=True \
+  wandb.entity=ai2-llm \
+  wandb.project=tinker \
+  wandb.run_name=debug-math-500 \
+  env=MinervaConfig \
+  env.dataset=math500 \
+  env.max_tokens=16384
 
 # big run
 python tinking/beaker/launch.py \

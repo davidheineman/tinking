@@ -41,11 +41,13 @@ class TerminalBenchEnvironment(Environment):
     def __init__(
         self,
         config: TerminalBenchConfig,
+        batch_size: int,
         group_size: int,
         renderer: Renderer,
         output_dir: str,
     ):
         self.config = config
+        self.batch_size = batch_size
         self.group_size = group_size
         self.renderer = renderer
         self.output_dir = output_dir

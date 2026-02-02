@@ -150,11 +150,13 @@ class MinervaEnvironment(Environment):
     def __init__(
         self,
         config: MinervaConfig,
+        batch_size: int,
         group_size: int,
         renderer: renderers.Renderer,
         output_dir: str,
     ):
         self.config = config
+        self.batch_size = batch_size
         self.group_size = group_size
         self.renderer = renderer
         self.output_dir = output_dir
@@ -163,7 +165,7 @@ class MinervaEnvironment(Environment):
         self.service_client = tinker.ServiceClient()
         
         self.dataset = MinervaDataset(
-            batch_size=group_size,
+            batch_size=batch_size,
             group_size=group_size,
             renderer=renderer,
             dataset=config.dataset,
