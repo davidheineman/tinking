@@ -46,6 +46,19 @@ minitb run \
 ### test trainer
 
 ```sh
+# RL on arithmetic + wandb
+python tinking/trainer.py \
+  model_name=meta-llama/Llama-3.2-1B \
+  batch_size=100 \
+  group_size=4 \
+  optim.lr=1e-4 \
+  env=MathConfig \
+  env.dataset=arithmetic \
+  env.max_tokens=5 \
+  wandb.entity=ai2-llm \
+  wandb.project=tinker \
+  wandb.run_name=debug-arithmetic
+
 # RL on MATH 500 + wandb
 python tinking/trainer.py \
   model_name=Qwen/Qwen3-4B-Instruct-2507 \
@@ -138,7 +151,7 @@ python tinking/beaker/launch.py \
   allow_dirty=true \
   -- \
 python tinking/trainer.py \
-  model_name=Qwen/Qwen3-4B-Instruct-2507 \
+  model_name=meta-llama/Llama-3.1-8B-Instruct \
   num_batches=100 \
   group_size=16 \
   wandb.enabled=True \

@@ -21,12 +21,14 @@ from minieval.score.core import ExactMatchFlex
 from minieval.extract.math_latex import MathExtractor
 from minieval.formatters import CoT
 
+from tinking.envs.arithmetic import ArithmeticEnv, ArithmeticInstance
 from tinking.envs.base import Environment, EnvironmentConfig
 
 console = Console()
 
+
 @dataclass
-class HFInstance:
+class MathInstance:
     question: str
     solution: str
     
@@ -39,7 +41,7 @@ class HFInstance:
 class MathConfig(EnvironmentConfig):
     """Config for Minerva math environment."""
     name: Literal["minerva"] = "minerva"
-    dataset: Literal["minerva", "math500", "olmo3_rlzero_7b", "olmo3_rl_32b", "nemotron", "deepmath", "polaris"] = "minerva"
+    dataset: Literal["arithmetic", "minerva", "math500", "olmo3_rlzero_7b", "olmo3_rl_32b", "nemotron", "deepmath", "polaris"] = "minerva"
     subset: str | None = None
     seed: int = 0
     max_tokens: int = 2048
@@ -85,7 +87,7 @@ class MathDataset(RLDataset):
         group_size: int,
         renderer: renderers.Renderer,
         convo_prefix: list[renderers.Message] | None = None,
-        dataset: Literal["minerva", "math500"] = "minerva",
+        dataset: str = "minerva",
         subset: str | None = None,
         seed: int = 0,
     ):
@@ -93,6 +95,8 @@ class MathDataset(RLDataset):
         self.group_size = group_size
         self.renderer = renderer
         self.convo_prefix = convo_prefix
+        self.dataset = dataset
+        self.seed = seed
         
         # Load data
         self.instances = self._load_instances(dataset, subset)
@@ -103,23 +107,30 @@ class MathDataset(RLDataset):
     
     def _load_instances(self, dataset: str, subset: str | None) -> list:
         match dataset:
+            case "arithmetic":
+                # Generate 10k arithmetic problems
+                rng = random.Random(self.seed)
+                return [
+                    ArithmeticInstance(x=rng.randint(0, 100), y=rng.randint(0, 100))
+                    for _ in range(10000)
+                ]
             case "olmo3_rlzero_7b":
                 ds = load_dataset("allenai/Dolci-RL-Zero-Math-7B", split="train")
                 return [
-                    HFInstance(question=row["prompt"], solution=row["ground_truth"])
+                    MathInstance(question=row["prompt"], solution=row["ground_truth"])
                     for row in ds
                 ]
             case "nemotron":
                 nemotron_subset = subset or "high_part02"
                 ds = load_dataset("nvidia/Nemotron-Math-v2", split=f"{nemotron_subset}")
                 return [
-                    HFInstance(question=row["problem"], solution=row["expected_answer"])
+                    MathInstance(question=row["problem"], solution=row["expected_answer"])
                     for row in ds
                 ]
             case "olmo3_rl_32b":
                 ds = load_dataset("allenai/Dolci-Think-RL-32B", split="train")
                 return [
-                    HFInstance(question=row["prompt"], solution=row["ground_truth"][0])
+                    MathInstance(question=row["prompt"], solution=row["ground_truth"][0])
                     for row in ds
                     if "math" in row["dataset"]
                 ]
@@ -128,14 +139,14 @@ class MathDataset(RLDataset):
                 # Sort by difficulty descending and take top 1K
                 ds = ds.sort("difficulty", reverse=True).select(range(1000))
                 return [
-                    HFInstance(question=row["question"], solution=row["final_answer"])
+                    MathInstance(question=row["question"], solution=row["final_answer"])
                     for row in ds
                 ]
             case "polaris":
                 ds = load_dataset("POLARIS-Project/Polaris-Dataset-53K", split="train")
                 # Filter to hardest problems (0/8 or 1/8 pass rate)
                 return [
-                    HFInstance(question=row["problem"], solution=row["answer"])
+                    MathInstance(question=row["problem"], solution=row["answer"])
                     for row in ds
                     if row["difficulty"] in ("0/8", "1/8")
                 ]
@@ -172,20 +183,26 @@ class MathDataset(RLDataset):
         
         return builders
     
-    def _make_env_group_builder(self, instance: Instance) -> ProblemGroupBuilder | None:
+    def _make_env_group_builder(self, instance) -> ProblemGroupBuilder | None:
         if not instance.question or not instance.solution:
             logger.warning("Skipping instance with missing question/solution")
             return None
         
+        if self.dataset == "arithmetic":
+            environ = ArithmeticEnv
+            convo_prefix = ArithmeticEnv.standard_fewshot_prefix()
+        else:
+            environ = MathEnv
+            convo_prefix = self.convo_prefix
+        
         return ProblemGroupBuilder(
             env_thunk=partial(
-                MathEnv,
-                instance,
-                self.renderer,
-                convo_prefix=self.convo_prefix,
+                environ, instance, 
+                renderer=self.renderer,
+                convo_prefix=convo_prefix,
             ),
             num_envs=self.group_size,
-            dataset_name="minerva",
+            dataset_name=self.dataset,
         )
     
     def __len__(self) -> int:
