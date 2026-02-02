@@ -72,6 +72,19 @@ python tinking/trainer.py \
   env.dataset=math500 \
   env.max_tokens=2048
 
+# Tinker Demo's MATH example + wandb
+python tinking/trainer.py \
+  model_name=Qwen/Qwen3-8B \
+  group_size=16 \
+  batch_size=64 \
+  optim.lr=2e-5 \
+  env=MathConfig \
+  env.dataset=hendrycks \
+  env.max_tokens=512 \
+  wandb.entity=ai2-llm \
+  wandb.project=tinker \
+  wandb.run_name=debug-math-hendrycks
+
 # RL on terminal hello world
 python tinking/trainer.py \
   model_name=Qwen/Qwen3-8B \

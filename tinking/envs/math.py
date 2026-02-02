@@ -14,7 +14,7 @@ from tinker_cookbook.rl.problem_env import ProblemEnv, ProblemGroupBuilder, logg
 from tinker_cookbook.rl.rollouts import do_group_rollout
 from tinker_cookbook.rl.types import EnvGroupBuilder, RLDataset, TrajectoryGroup
 
-from datasets import load_dataset
+from datasets import load_dataset, get_dataset_config_names, concatenate_datasets
 from minieval.tasks.minerva import Instance, MinervaMath, Math500
 from minieval.datatypes import TaskConfig as MiniEvalTaskConfig, LMOutput
 from minieval.score.core import ExactMatchFlex
@@ -41,7 +41,7 @@ class MathInstance:
 class MathConfig(EnvironmentConfig):
     """Config for Minerva math environment."""
     name: Literal["minerva"] = "minerva"
-    dataset: Literal["arithmetic", "minerva", "math500", "olmo3_rlzero_7b", "olmo3_rl_32b", "nemotron", "deepmath", "polaris"] = "minerva"
+    dataset: Literal["arithmetic", "minerva", "math500", "hendrycks", "olmo3_rlzero_7b", "olmo3_rl_32b", "nemotron", "deepmath", "polaris"] = "minerva"
     subset: str | None = None
     seed: int = 0
     max_tokens: int = 2048
@@ -149,6 +149,32 @@ class MathDataset(RLDataset):
                     MathInstance(question=row["problem"], solution=row["answer"])
                     for row in ds
                     if row["difficulty"] in ("0/8", "1/8")
+                ]
+            case "hendrycks":
+                # For Hendrycks MATH, the standard is to use both the "train" and "test" splits for
+                # training. The "test" split here is NOT the same as the MATH-500 test split,
+                # which is a commonly-held-out subset of 500 of the below 12.5k problems. To construct
+                # a clean training set, we filter out problems that exist in the MATH-500 test set,
+                # resulting in ~12000 train and 500 test problems.
+                
+                # Get MATH-500 test problems to exclude
+                math500_ds = load_dataset("HuggingFaceH4/MATH-500", split="test")
+                test_problems: set[str] = {row["problem"] for row in math500_ds}
+                
+                # Load all Hendrycks MATH configs and splits, excluding MATH-500 test problems
+                dataset_name = "EleutherAI/hendrycks_math"
+                configs = get_dataset_config_names(dataset_name)
+                pieces = []
+                for cfg in configs:
+                    for split in ("train", "test"):
+                        ds = load_dataset(dataset_name, name=cfg, split=split)
+                        ds = ds.filter(lambda example: example["problem"] not in test_problems)
+                        pieces.append(ds)
+                full_dataset = concatenate_datasets(pieces)
+                
+                return [
+                    MathInstance(question=row["problem"], solution=row["solution"])
+                    for row in full_dataset
                 ]
             case "math500" | "minerva":
                 task_config = MiniEvalTaskConfig(
