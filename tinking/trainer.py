@@ -18,10 +18,12 @@ from tinker_cookbook.rl.data_processing import assemble_training_data, compute_a
 from tinker_cookbook.tokenizer_utils import get_tokenizer
 from tinker_cookbook.renderers import get_renderer
 
+from tinking.advantages import compute_entropic_group_advantages
 from tinking.envs.base import Environment, EnvironmentConfig
+from tinking.envs.erdos import ErdosEnvironment
 from tinking.envs.terminal import TerminalBenchEnvironment
 from tinking.envs.math import MathEnvironment
-from tinking.logs import log_batch_info
+from tinking.logs import log_batch_info, format_rollout_for_wandb, compute_bigram_diversity
 
 console = Console()
 
@@ -65,9 +67,14 @@ class Config:
     # wandb config
     wandb: WandbConfig = chz.field(default_factory=WandbConfig)
     
+    # advantage estimation
+    adv_estimator: str = "default"  # "default" or "entropic"
+    adv_beta: float = 2.0  # β for entropic advantages
+    
     # administravista
     log_path: str = "logs" # "~/.cache/tinking/logs"
     save_every: int = 10
+    auto_save_ckpts: bool = True
     base_url: str | None = None
 
 
@@ -142,6 +149,14 @@ async def main(config: Config):
                 renderer=renderer,
                 output_dir=rollouts_dir,
             )
+        case "erdos":
+            env: Environment = ErdosEnvironment(
+                config=config.env,
+                batch_size=config.batch_size,
+                group_size=config.group_size,
+                renderer=renderer,
+                output_dir=rollouts_dir,
+            )
         case _:
             raise ValueError(f"Unknown environment name: {config.env.name!r}")
     
@@ -200,7 +215,12 @@ async def main(config: Config):
             continue
         
         # Compute advantages
-        advantages_P = compute_advantages(trajectory_groups_filtered)
+        if config.adv_estimator == "entropic":
+            advantages_P = compute_entropic_group_advantages(
+                trajectory_groups_filtered, beta=config.adv_beta
+            )
+        else:
+            advantages_P = compute_advantages(trajectory_groups_filtered)
         
         # Assemble training data
         data_D, metadata_D = assemble_training_data(
@@ -269,7 +289,7 @@ async def main(config: Config):
         
         # Log to wandb
         if config.wandb.enabled:
-            wandb.log({
+            log_dict = {
                 "batch": batch_idx,
                 "reward/mean": mean_reward,
                 "reward/variance": reward_variance,
@@ -277,10 +297,30 @@ async def main(config: Config):
                 "tokens/avg_per_rollout": avg_tokens_per_rollout,
                 "train/lr": config.optim.lr,
                 "time/step_seconds": step_time,
-            }, step=batch_idx)
+            }
+
+            # Environment-specific metrics
+            if hasattr(env, "best_c5") and env.best_c5 is not None:
+                log_dict["erdos/best_c5"] = env.best_c5
+
+            # N-gram diversity (unique bigrams across N samples)
+            bigram_stats = compute_bigram_diversity(trajectory_groups_filtered)
+            log_dict["diversity/unique_bigrams"] = bigram_stats["unique_bigrams"]
+            log_dict["diversity/total_bigrams"] = bigram_stats["total_bigrams"]
+            log_dict["diversity/bigram_ratio"] = bigram_stats["diversity_ratio"]
+
+            wandb.log(log_dict, step=batch_idx)
+
+            # Log one rollout sample to wandb
+            rollout_text = format_rollout_for_wandb(
+                trajectory_groups_filtered, tokenizer, group_idx=0, rollout_idx=0, num_tokens=200
+            )
+            if rollout_text is not None:
+                escaped = rollout_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                wandb.log({"rollout/sample": wandb.Html(f"<pre>{escaped}</pre>")}, step=batch_idx)
         
         # Save checkpoint
-        if (batch_idx + 1) % config.save_every == 0:
+        if config.auto_save_ckpts and (batch_idx + 1) % config.save_every == 0:
             await checkpoint_utils.save_checkpoint_async(
                 training_client=training_client,
                 name=f"{batch_idx:06d}",
@@ -289,17 +329,20 @@ async def main(config: Config):
                 kind="both",
             )
     
-    logger.info("Saving final checkpoint...")
-
-    # Save final checkpoint
-    await checkpoint_utils.save_checkpoint_async(
-        training_client=training_client,
-        name="final",
-        log_path=log_path,
-        loop_state={"batch": config.num_batches},
-        kind="both",
-    )
+    if config.auto_save_ckpts:
+        logger.info("Saving final checkpoint...")
+        await checkpoint_utils.save_checkpoint_async(
+            training_client=training_client,
+            name="final",
+            log_path=log_path,
+            loop_state={"batch": config.num_batches},
+            kind="both",
+        )
     
+    # Print environment-specific summary
+    if hasattr(env, "print_summary"):
+        env.print_summary()
+
     if config.wandb.enabled:
         wandb.finish()
     

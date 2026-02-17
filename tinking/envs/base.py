@@ -4,7 +4,7 @@ from typing import Literal
 
 from tinker_cookbook.rl.types import TrajectoryGroup
 
-EnvironmentName = Literal["minerva", "terminal"]
+EnvironmentName = Literal["minerva", "terminal", "erdos"]
 
 
 @dataclass

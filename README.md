@@ -137,6 +137,54 @@ python tinking/trainer.py \
 # openai/gpt-oss-120b
 ```
 
+### rl on ttt-discovery
+
+```sh
+python tinking/trainer.py \
+  model_name=openai/gpt-oss-20b \
+  num_batches=50 \
+  batch_size=512 \
+  group_size=64 \
+  lora_rank=32 \
+  adv_estimator=entropic \
+  adv_beta=2.0 \
+  env=ErdosConfig \
+  env.n_points=200 \
+  env.buffer_size=16 \
+  env.epsilon=0.125 \
+  env.max_tokens=2048 \
+  env.teacher_forcing=True \
+  env.context_window_tokens=4096 \
+  wandb.enabled=False
+
+python tinking/beaker/launch.py \
+  workspace=ai2/davidh \
+  budget=ai2/oe-base \
+  follow=true \
+  allow_dirty=true \
+  -- \
+python tinking/trainer.py \
+  model_name=openai/gpt-oss-20b \
+  num_batches=50 \
+  batch_size=512 \
+  group_size=64 \
+  lora_rank=32 \
+  adv_estimator=entropic \
+  adv_beta=2.0 \
+  log_path=/results \
+  env=ErdosConfig \
+  env.n_points=200 \
+  env.buffer_size=16 \
+  env.epsilon=0.125 \
+  env.max_tokens=26000 \
+  env.teacher_forcing=True \
+  env.context_window_tokens=32768 \
+  wandb.enabled=True \
+  wandb.entity=ai2-llm \
+  wandb.project=tinker \
+  wandb.run_name=erdos-ttt
+```
+
 ### rl on beaker
 
 ```sh
